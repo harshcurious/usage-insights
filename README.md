@@ -83,9 +83,10 @@ Changes from upstream:
 - OpenCode reasoning tokens are counted as output (its `tokens.output`
   excludes them); OpenCode databases are read incrementally by `time_updated`,
   including the newer `session_message` schema.
-- The selected day's detail follows the model/provider filters; the heatmap is
-  scoped to the period and greys out days before it; leaderboard changes show
-  one sign.
+- Token usage and model usage are independent: the heatmap and selected day
+  always cover the past year across every model, while the period and
+  model/provider filters scope only the model chart and leaderboard;
+  leaderboard changes show one sign.
 - Dashboard polling backs off while the background indexer runs.
 - Leftover temp/lock files are swept; only three corrupt backups are kept.
 - Settings sync can no longer stall; the selected day/year follow today across

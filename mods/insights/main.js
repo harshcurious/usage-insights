@@ -18,7 +18,6 @@ import {
   isDay,
   isPresentation,
   normalizeConfig,
-  periodRange,
   PERIODS,
   projectName,
   todayKey,
@@ -1533,12 +1532,10 @@ export default class Insights extends View {
     if (!PERIODS.includes(period)) return;
     this.period = period;
     const today = todayKey();
-    const config = normalizeConfig(this.snapshot?.config ?? {});
     if (period === "year") {
       const years = this.years?.length ? this.years : [Number(today.slice(0, 4))];
       if (!years.includes(this.year)) this.year = years[0] ?? Number(today.slice(0, 4));
     }
-    this.selectedDay = periodRange(period, { today, weekStartsOn: config.weekStartsOn, year: this.year }).end;
     this.scheduleDashboard(cx, { force: true });
   }
 
@@ -1548,8 +1545,6 @@ export default class Insights extends View {
     const current = Math.max(0, years.indexOf(this.year));
     const next = Math.min(years.length - 1, Math.max(0, current + delta));
     this.year = years[next] ?? Number(today.slice(0, 4));
-    const config = normalizeConfig(this.snapshot?.config ?? {});
-    this.selectedDay = periodRange("year", { today, weekStartsOn: config.weekStartsOn, year: this.year }).end;
     this.scheduleDashboard(cx, { force: true });
   }
 
@@ -1715,7 +1710,7 @@ export default class Insights extends View {
       .child(this.metricStrip(c, lifetime, peak, streaks))
       .when(rowCount === 0, (el) => el.child(this.emptyNotice(c, config)))
       .child(this.sectionHeader("Token usage", c))
-      .child(this.heatmapCard(c, config, heatmap, selectedDay, range))
+      .child(this.heatmapCard(c, config, heatmap, selectedDay))
       .child(this.tokenDetailCard(c, heatmap, selectedDay, derived.today, selectedTotals, selectedTop, lifetime, derived.lifetimeTop))
       .child(this.sectionHeader("Model usage", c))
       .child(this.filtersBar(c, config, range, derived.facets, years))
@@ -1883,7 +1878,7 @@ export default class Insights extends View {
     return band;
   }
 
-  heatmapCard(c, config, heatmap, selectedDay, range) {
+  heatmapCard(c, config, heatmap, selectedDay) {
     const dark = isDarkTheme(c);
     const palette = PALETTES.includes(config.palette) ? config.palette : "blue";
     const metrics = heatmapMetrics(this.width, heatmap.weeks.length, Number(settings().zoom) || 1, this.heatmapRowPx);
@@ -1943,7 +1938,7 @@ export default class Insights extends View {
 
     return card(c).gap(G.md)
       .child(h_flex().w_full().flex_wrap().gap(G.sm).items_center().justify_between()
-        .child(cardHeader("Tokens History", range?.label ?? null, c))
+        .child(cardHeader("Tokens History", "Past year · all models", c))
         .child(segmented("ins-heat-mode", [
           { key: "daily", label: "Daily" },
           { key: "weekly", label: "Weekly" },

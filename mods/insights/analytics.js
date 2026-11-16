@@ -951,9 +951,9 @@ export function deriveDashboard(snapshot, options = {}) {
   const { filters, period, year, heatmapMode, leaderboardGroup, today } = settings;
   const years = availableYears(rows, today);
   const includeCache = config.includeCache;
-  // Only the all-time summary metrics (lifetime, peak, streaks) ignore the
-  // period; the heatmap, charts, totals and day detail follow the selected
-  // range and facets.
+  // Token usage (metrics, heatmap, day detail) always covers every row and
+  // ends today; the period and facet filters scope only the model usage
+  // sections (model chart, totals, leaderboard). The two are independent.
   const dimensionRows = filterRows(rows, filters);
   const range = periodRange(period, { today, weekStartsOn: config.weekStartsOn, year });
   const periodRows = filterRowsByRange(dimensionRows, range);
@@ -963,10 +963,8 @@ export function deriveDashboard(snapshot, options = {}) {
   const lifetime = sumTokens(rows, includeCache);
   const peak = peakDay(rows, includeCache);
   const streaks = streakStats(rows, { today, includeCache });
-  const heatmap = buildHeatmap(periodRows, {
-    ...(periodWeeks ? { weeks: periodWeeks } : {}),
-    rangeStart: range.start,
-    endDay: range.end,
+  const heatmap = buildHeatmap(rows, {
+    endDay: today,
     weekStartsOn: config.weekStartsOn,
     mode: heatmapMode,
     includeCache,
@@ -986,7 +984,7 @@ export function deriveDashboard(snapshot, options = {}) {
 
   const selectedInRange = heatmap.cells.find((cell) => cell.date === settings.selectedDay && !cell.inactive);
   const selectedDay = selectedInRange ? settings.selectedDay : heatmap.range.dataEnd;
-  const selectedRows = dimensionRows.filter((row) => row.day === selectedDay);
+  const selectedRows = rows.filter((row) => row.day === selectedDay);
   const selectedTotals = sumTokens(selectedRows, includeCache);
   const selectedTop = selectedRows.length
     ? leaderboard(selectedRows, null, { groupBy: "model", includeCache, limit: 1 }).entries[0]

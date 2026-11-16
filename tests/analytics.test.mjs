@@ -365,7 +365,7 @@ test("leaderboard ranks, dedupes sessions and handles New and zero comparisons",
   assert.equal(compareChange(10, 10, false).label, "—");
 });
 
-test("dashboard: lifetime metrics stay unfiltered while the heatmap follows the facets", () => {
+test("dashboard: token usage ignores the model usage filters", () => {
   const value = snapshot({
     rows: [
       row({ day: "2024-01-08", session: "s1", model: "model-a", provider: "p1", tokens: { input: 100, output: 0 } }),
@@ -380,19 +380,15 @@ test("dashboard: lifetime metrics stay unfiltered while the heatmap follows the 
     selectedDay: "2024-01-09",
     today: "2024-01-10",
   });
-  // Lifetime metrics ignore filters; the heatmap and model usage follow them.
+  // Token usage (lifetime, heatmap, day detail) covers every model.
   assert.equal(derived.lifetime.total, 400);
-  assert.equal(derived.heatmap.windowTotal, 100);
+  assert.equal(derived.heatmap.windowTotal, 400);
+  assert.equal(derived.selectedTotals.total, 300, "model-b's day still shows its usage");
+  assert.equal(derived.selectedTop.name, "model-b");
+  // Model usage follows the filters.
   assert.deepEqual(derived.leaders.entries.map((entry) => entry.name), ["model-a"]);
   assert.deepEqual(derived.modelSeries.models, ["model-a"]);
-  // The selected day's detail follows the same facets as the heatmap cell.
-  assert.equal(derived.selectedTotals.total, 0, "model-b's day shows no model-a usage");
-  const onA = deriveDashboard(value, {
-    filters: { provider: "all", model: "model-a" },
-    period: "all", year: 2024, heatmapMode: "daily", selectedDay: "2024-01-08", today: "2024-01-10",
-  });
-  assert.equal(onA.selectedTotals.total, 100);
-  assert.equal(onA.selectedTop.name, "model-a");
+  assert.equal(derived.totals.total, 100);
 });
 
 test("model series stacks weekly tokens by top model with an Other bucket", () => {
@@ -558,7 +554,7 @@ test("dashboard cache reuses facet-aware derivation until snapshot or state chan
   assert.equal(calls, 11);
 });
 
-test("month heatmap shows days before the period as inactive, not as zero usage", () => {
+test("token heatmap ignores the model usage period", () => {
   const value = snapshot({
     config: { ...snapshot().config, weekStartsOn: 1 },
     rows: [
@@ -566,14 +562,25 @@ test("month heatmap shows days before the period as inactive, not as zero usage"
       row({ day: "2026-11-03", session: "s1", model: "model-a", tokens: { input: 40, output: 0, cacheRead: 0, cacheWrite: 0 } }),
     ],
   });
-  const derived = deriveDashboard(value, {
-    period: "month", year: 2026, heatmapMode: "daily", selectedDay: "2026-10-28", today: "2026-11-16",
+  const options = { year: 2026, heatmapMode: "daily", selectedDay: "2026-10-28", today: "2026-11-16" };
+  const all = deriveDashboard(value, { ...options, period: "all" });
+  for (const period of ["week", "month", "year"]) {
+    const derived = deriveDashboard(value, { ...options, period });
+    assert.deepEqual(derived.heatmap, all.heatmap, `${period} leaves the heatmap alone`);
+    assert.equal(derived.selectedDay, "2026-10-28", `${period} keeps the selected day`);
+    assert.equal(derived.selectedTotals.total, 500);
+  }
+  assert.equal(all.heatmap.weeks.length, 53);
+  assert.ok(all.heatmap.cells.every((cell) => !cell.outside));
+  // The model usage period still applies to its own sections.
+  assert.equal(deriveDashboard(value, { ...options, period: "month" }).totals.total, 40);
+});
+
+test("a period heatmap shows days before its start as inactive, not as zero usage", () => {
+  const heatmap = buildHeatmap([], {
+    weeks: 4, rangeStart: "2026-11-01", endDay: "2026-11-16", weekStartsOn: 1,
   });
-  const october = derived.heatmap.cells.filter((cell) => cell.date < "2026-11-01");
+  const october = heatmap.cells.filter((cell) => cell.date < "2026-11-01");
   assert.equal(october[0].date, "2026-10-26", "the first week is padded back to Monday");
   assert.ok(october.every((cell) => cell.inactive && cell.outside && cell.tooltip === "" && cell.level === 0));
-  assert.notEqual(derived.selectedDay, "2026-10-28", "a day outside the period cannot stay selected");
-  const november = derived.heatmap.cells.find((cell) => cell.date === "2026-11-03");
-  assert.equal(november.inactive, false);
-  assert.equal(november.daily, 40);
 });
