@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import {
   chmod,
   copyFile,
@@ -17,6 +19,69 @@ import os from "node:os";
 import path from "node:path";
 
 export const STORE_VERSION = 1;
+const MACHINE_ID = /^[A-Za-z0-9-]{8,128}$/;
+let cachedMachineId;
+
+function probeMachineId() {
+  if (process.platform === "linux") {
+    for (const file of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+      try {
+        const id = readFileSync(file, "utf8").trim();
+        if (MACHINE_ID.test(id)) return id;
+      } catch { /* try the next location */ }
+    }
+    return null;
+  }
+  if (process.platform !== "darwin") return null;
+  // ioreg costs ~30ms, so keep the answer in this user's private temp folder.
+  const cache = path.join(os.tmpdir(), "herdr-insights-machine-id");
+  try {
+    const id = readFileSync(cache, "utf8").trim();
+    if (MACHINE_ID.test(id)) return id;
+  } catch { /* probe below */ }
+  try {
+    const out = execFileSync("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], {
+      encoding: "utf8",
+      timeout: 2_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const id = /"IOPlatformUUID" = "([^"]+)"/.exec(out)?.[1] ?? null;
+    if (!id || !MACHINE_ID.test(id)) return null;
+    try { writeFileSync(cache, id, { mode: 0o600 }); } catch { /* cache is optional */ }
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A stable id for this machine (macOS platform UUID, Linux machine-id), or
+ * null. Unlike os.hostname(), it does not change when macOS renames the
+ * machine for a new network or a Bonjour name clash.
+ */
+export function machineId() {
+  if (cachedMachineId === undefined) cachedMachineId = probeMachineId();
+  return cachedMachineId;
+}
+
+/** Fields that identify the machine writing a lock, fence or claim. */
+export function ownerIdentity() {
+  const machine = machineId();
+  return machine ? { host: os.hostname(), machine } : { host: os.hostname() };
+}
+
+/**
+ * Whether a lock, fence or claim was written on this machine, so its pid can
+ * be checked locally. Hostnames still match the common case; the machine id
+ * keeps a record recognisable after the hostname changes.
+ */
+export function isLocalOwner(record) {
+  if (!record) return false;
+  if (record.host === os.hostname()) return true;
+  const mine = typeof record.machine === "string" ? machineId() : null;
+  return Boolean(mine && record.machine === mine);
+}
+
 export const STORE_LOCK_STALE_MS = 10 * 60 * 1000;
 export const MAX_LINE_BYTES = 16 * 1024 * 1024;
 // A turn without harness-reported task boundaries is capped. This keeps idle
@@ -256,7 +321,7 @@ export async function withStoreLock(
   const lockPath = `${storePath}.lock`;
   await ensureParent(lockPath);
   const token = `${process.pid}-${Date.now()}-${randomBytes(8).toString("hex")}`;
-  const host = os.hostname();
+  const identity = ownerIdentity();
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
   const ownerName = `owner-${token}.json`;
@@ -273,7 +338,7 @@ export async function withStoreLock(
     const handle = await open(path.join(stagingPath, ownerName), "wx", 0o600);
     try {
       await handle.writeFile(
-        `${JSON.stringify({ ...meta, pid: process.pid, host, startedAt, token })}\n`,
+        `${JSON.stringify({ ...meta, pid: process.pid, ...identity, startedAt, token })}\n`,
         "utf8",
       );
       await handle.sync();
@@ -301,16 +366,24 @@ export async function withStoreLock(
       }
       const current = observed ?? await readLockInfo(lockPath);
       const age = await lockAgeMs(lockPath);
-      const sameHost = current?.host === host;
       const pid = Number(current?.pid);
-      const dead = sameHost && Number.isInteger(pid) && !isProcessAlive(pid);
-      // Only provably dead local owners can be evicted. Foreign/empty locks
-      // fail closed rather than allowing two writers based on elapsed time.
-      const malformedOld = !current?.directory && current?.invalid
-        && age > Math.max(staleMs, 60_000);
+      const dead = isLocalOwner(current) && Number.isInteger(pid) && !isProcessAlive(pid);
+      // Only provably dead local owners can be evicted. Foreign locks fail
+      // closed rather than allowing two writers based on elapsed time.
+      const malformedOld = current?.invalid && age > Math.max(staleMs, 60_000);
 
-      if (dead || malformedOld) {
+      if (dead || (malformedOld && !current.directory)) {
         const removed = await tryUnlinkStaleLock(lockPath, current);
+        if (removed) continue;
+      } else if (malformedOld) {
+        // A reclaimer killed between unlinking the owner and removing the
+        // directory leaves it empty forever. rmdir removes only an empty
+        // directory, so it can never delete a lock a new owner published.
+        const removed = await rmdir(lockPath).then(() => true, (error) => {
+          if (error?.code === "ENOENT") return true;
+          if (["ENOTEMPTY", "EEXIST", "ENOTDIR"].includes(error?.code)) return false;
+          throw error;
+        });
         if (removed) continue;
       }
       if (Date.now() >= deadline) {

@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   clearWorkerClaim,
@@ -10,7 +9,7 @@ import {
   updateWorkerClaimPid,
   workerClaimActive,
 } from "./fence.mjs";
-import { isProcessAlive, readStoreLockInfo, sleep } from "./util.mjs";
+import { isProcessAlive, ownerIdentity, readStoreLockInfo, sleep } from "./util.mjs";
 
 export const DEFAULT_WORKER_ACK_MS = 1_500;
 
@@ -57,7 +56,7 @@ export async function ensureIndexer(
     version: 1,
     token: claimToken(),
     pid: null,
-    host: os.hostname(),
+    ...ownerIdentity(),
     generation: Number.isInteger(generation) ? generation : 0,
     startedAt: Date.now(),
     at: Date.now(),

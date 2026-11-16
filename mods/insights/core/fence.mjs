@@ -1,11 +1,12 @@
 import { link, open, readFile, rename, unlink } from "node:fs/promises";
-import os from "node:os";
 import { randomBytes } from "node:crypto";
 import {
   atomicWriteJson,
   isPlainObject,
   isProcessAlive,
   readJsonFile,
+  isLocalOwner,
+  ownerIdentity,
 } from "./util.mjs";
 
 // A generation fence is written BEFORE a configure/rebuild waits for the store
@@ -83,8 +84,7 @@ export async function readEffectiveFence(storePath, { now = Date.now() } = {}) {
   const fence = await readFence(storePath);
   if (!fence) return null;
   const age = now - Number(fence.at ?? 0);
-  const sameHost = fence.host === os.hostname();
-  const dead = sameHost && Number.isInteger(fence.pid) && !isProcessAlive(fence.pid);
+  const dead = isLocalOwner(fence) && Number.isInteger(fence.pid) && !isProcessAlive(fence.pid);
   const abandoned = Number.isFinite(age) && age > FENCE_ABANDONED_MS;
   return { ...fence, stale: dead || abandoned };
 }
@@ -94,7 +94,7 @@ export async function writeFence(storePath, generation) {
     version: FENCE_VERSION,
     generation,
     pid: process.pid,
-    host: os.hostname(),
+    ...ownerIdentity(),
     at: Date.now(),
   };
   await atomicWriteJson(fencePath(storePath), value);
@@ -274,7 +274,7 @@ export async function clearWorkerClaim(storePath, token) {
  */
 export function workerClaimActive(claim, { now = Date.now() } = {}) {
   if (!claim) return false;
-  if (claim.host !== os.hostname()) return true;
+  if (!isLocalOwner(claim)) return true;
   if (Number.isInteger(claim.pid) && claim.pid > 0) return isProcessAlive(claim.pid);
   const age = now - Number(claim.at ?? claim.startedAt ?? 0);
   return Number.isFinite(age) && age < WORKER_CLAIM_STARTUP_MS;

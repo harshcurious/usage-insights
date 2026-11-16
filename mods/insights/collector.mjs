@@ -33,6 +33,7 @@ import {
 } from "./core/store.mjs";
 import {
   expandHome,
+  isLocalOwner,
   isLockBusyError,
   readStoreLockInfo,
   sleep,
@@ -206,11 +207,11 @@ async function overlayLiveProgress(storePath, snapshot) {
     readWorkerClaim(storePath),
     readStoreLockInfo(storePath),
   ]);
-  if (!claim || claim.host !== os.hostname() || !workerClaimActive(claim)) return snapshot;
+  if (!claim || !isLocalOwner(claim) || !workerClaimActive(claim)) return snapshot;
   if (claim.pid !== live.pid || claim.generation !== live.generation || claim.token !== live.token) {
     return snapshot;
   }
-  if (!owner || owner.role !== "worker" || owner.host !== os.hostname()) return snapshot;
+  if (!owner || owner.role !== "worker" || !isLocalOwner(owner)) return snapshot;
   if (owner.pid !== live.pid || Number(owner.generation) !== live.generation) return snapshot;
   if (Number.isInteger(scan.workerPid) && scan.workerPid !== live.pid) return snapshot;
   return {
@@ -297,7 +298,7 @@ async function runWithStoreLock(
         if (
           signalWorker
           && !signaled
-          && owner.host === os.hostname()
+          && isLocalOwner(owner)
           && Number.isInteger(owner.pid)
           && owner.pid > 0
           && (fenceGeneration === null || Number(owner.generation ?? 0) < fenceGeneration)
