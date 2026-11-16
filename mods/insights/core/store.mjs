@@ -924,6 +924,16 @@ function validateLoadedStore(store) {
   return configMigration.migrated;
 }
 
+/** The settings of a store that failed validation, when they are still valid. */
+function salvageConfig(parsed) {
+  if (!isPlainObject(parsed) || !isPlainObject(parsed.config)) return null;
+  try {
+    return migrateLoadedConfig(normalizeConfig(parsed.config)).config;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadStore(storePath, { readOnly = false } = {}) {
   const warnings = [];
   let errors = 0;
@@ -941,6 +951,18 @@ export async function loadStore(storePath, { readOnly = false } = {}) {
   let parsed;
   try {
     parsed = JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  if (isPlainObject(parsed) && Number.isInteger(parsed.version) && parsed.version > STORE_VERSION) {
+    // Written by a newer Insights: resetting would discard history that the
+    // newer version can still read, so leave the file untouched.
+    throw new Error(
+      `Insights store version ${parsed.version} is newer than this mod supports (${STORE_VERSION}); update the Insights mod.`,
+    );
+  }
+  try {
+    if (parsed === undefined) throw new Error("store is not valid JSON");
     const migrated = validateLoadedStore(parsed);
     ensureStoreMeta(parsed);
     prepareStore(parsed);
@@ -964,8 +986,10 @@ export async function loadStore(storePath, { readOnly = false } = {}) {
       `Store was corrupt and has been preserved at ${backup}; a fresh store was started (${error.message}).`,
     );
     errors += 1;
+    const config = salvageConfig(parsed);
+    if (config) warnings.push("Settings were kept from the corrupt store.");
     return {
-      store: emptyStore(),
+      store: emptyStore(config ?? defaultConfig()),
       warnings,
       errors,
       exists: true,

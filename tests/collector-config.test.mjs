@@ -307,6 +307,28 @@ test("corrupt stores are preserved, diagnosed, and replaced with a valid store",
   assert.ok(result.warnings.some((warning) => warning.includes(backup)));
 });
 
+test("a corrupt store keeps its settings; a newer store version is left untouched", async () => {
+  const context = await env();
+  await mkdir(path.dirname(context.store), { recursive: true });
+  const config = { ...defaultConfig(), profile: { name: "Kept", handle: "@kept", avatar: "" }, palette: "green" };
+  await writeFile(context.store, JSON.stringify({
+    version: 1, config, files: { bad: "not an entry" }, dedup: {}, tasks: {}, nextFileId: 1,
+  }));
+  const result = await snapshot(context);
+  assert.ok(result.warnings.some((warning) => /corrupt/i.test(warning)));
+  assert.equal(result.config.profile.name, "Kept");
+  assert.equal(result.config.palette, "green");
+
+  const newer = JSON.stringify({ version: 99, config, files: {}, dedup: {}, tasks: {}, nextFileId: 1 });
+  await writeFile(context.store, newer);
+  const refused = await run(["snapshot", "--store", context.store, "--home", context.home]);
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr + refused.stdout, /newer than this mod supports/);
+  assert.equal(await readFile(context.store, "utf8"), newer);
+  const entries = await readdir(path.dirname(context.store));
+  assert.equal(entries.filter((entry) => entry.includes(".corrupt-")).length, 1, "no backup of the newer store");
+});
+
 test("concurrent snapshots serialize on a safe lock and stale locks are reclaimed", async () => {
   const context = await env();
   await placeFixture(
