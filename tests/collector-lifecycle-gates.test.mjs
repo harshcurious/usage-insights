@@ -328,7 +328,7 @@ test("configure during a slow worker fences the old generation and commits only 
       config: sourceConfig(["~/.codex/sessions/new"]),
       lockWaitMs: 25_000,
     });
-    assert.ok(["complete", "partial"].includes(configured.scan.status));
+    assert.ok(["complete", "partial"].includes(configured.scan.status), JSON.stringify(configured.scan));
     assert.deepEqual(configured.config.sources[0].roots, ["~/.codex/sessions/new"]);
     assert.equal(configured.rows.some((row) => row.model === "gate-model"), false,
       "old history was rebuilt away with the source change");

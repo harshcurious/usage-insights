@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
@@ -246,6 +247,40 @@ test("profile-only configure stays incremental; source mapping changes invalidat
 
   const reenabled = await configure(context, firstConfig);
   assert.equal(reenabled.rows[0].tokens.input, 10);
+});
+
+test("source changes keep history whose logs are gone; only invalidated files are dropped", async () => {
+  const context = await env();
+  const log = await placeFixture(context, "logs/custom.jsonl", "custom.jsonl");
+  await placeFixture(context, "more/custom.jsonl", "custom.jsonl");
+  const firstConfig = { sources: [customSource] };
+  const first = await configure(context, firstConfig);
+  assert.equal(first.rows[0].tokens.input, 10);
+
+  // Turning the source off hides its rows but keeps them collected.
+  const disabled = await configure(context, { sources: [{ ...customSource, enabled: false }] });
+  assert.equal(disabled.rows.length, 0);
+  // The agent deletes its transcript while the source is off.
+  await rm(log);
+  const reenabled = await configure(context, firstConfig);
+  assert.equal(reenabled.rows[0].tokens.input, 10, "history survives a disable/enable round trip");
+
+  // Adding a root keeps files still under the source's roots.
+  const widened = await configure(context, {
+    sources: [{ ...customSource, roots: ["~/logs", "~/more"] }],
+  });
+  assert.equal(widened.rows.reduce((sum, row) => sum + row.tokens.input, 0), 10,
+    "the copied file dedups against the kept history");
+
+  // Dropping the original root drops only that root's files.
+  const narrowed = await configure(context, { sources: [{ ...customSource, roots: ["~/more"] }] });
+  assert.equal(narrowed.rows[0].tokens.input, 10);
+
+  // A mapping change re-parses the source from what is on disk.
+  const remapped = await configure(context, {
+    sources: [{ ...customSource, roots: ["~/more"], mapping: { ...customSource.mapping, harness: "acme2" } }],
+  });
+  assert.equal(remapped.rows[0].harness, "acme2");
 });
 
 test("corrupt stores are preserved, diagnosed, and replaced with a valid store", async () => {

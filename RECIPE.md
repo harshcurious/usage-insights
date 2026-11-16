@@ -133,6 +133,10 @@ The metadata-only
 store is `<HERDR_APP_HOME>/data/insights/insights.json`; never save prompt/response
 text. Use source-tagged status/warnings for missing, disabled, empty, and failed
 sources. Preserve historical rows from removed files until explicit rebuild.
+Settings changes never clear everything: disabling a source hides its rows
+(re-enabling restores them), a roots change drops only that source's files no
+longer under its roots, and an adapter or mapping change (or removing the
+source) drops only that source.
 
 Custom sources use a declarative `mapping`: required `session`, `timestamp`, and
 `usage`; optional `messageId`, `project`, `model`, `provider`, `role`, `roles`,

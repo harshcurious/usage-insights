@@ -386,18 +386,6 @@ export function migrateLoadedConfig(config) {
   };
 }
 
-export function sourcesSignature(config) {
-  return JSON.stringify(
-    config.sources.map((source) => ({
-      id: source.id,
-      adapter: source.adapter,
-      enabled: source.enabled,
-      roots: source.roots,
-      mapping: source.mapping ?? null,
-    })),
-  );
-}
-
 export function defaultConfig() {
   return normalizeConfig(DEFAULT_CONFIG);
 }

@@ -364,6 +364,40 @@ export function resetFileEntry(store, entry) {
   return entry;
 }
 
+/**
+ * Drop the file entries `shouldDrop` selects, with the usage and tasks they
+ * own. Copies held by surviving files take ownership, as with a single delete,
+ * but the dedup and task maps are walked once for the whole batch. Returns the
+ * number of entries dropped.
+ */
+export function dropFileEntries(store, shouldDrop) {
+  if (store._tx) throw new Error("cannot drop file entries inside a transaction");
+  if (!store._byId) prepareStore(store);
+  const dropped = new Set();
+  for (const [key, entry] of Object.entries(store.files)) {
+    if (!shouldDrop(entry)) continue;
+    dropped.add(entry.id);
+    delete store.files[key];
+    store._byId.delete(entry.id);
+  }
+  if (dropped.size === 0) return 0;
+  const sweep = (map, auxIndex, transfer) => {
+    for (const [key, value] of Object.entries(map)) {
+      if (!Array.isArray(value)) continue;
+      const aux = value[auxIndex];
+      if (isPlainObject(aux) && Array.isArray(aux.copies)) {
+        aux.copies = aux.copies.filter((id) => !dropped.has(id));
+      }
+      if (!dropped.has(value[0])) continue;
+      if (transfer(store, value)) continue;
+      delete map[key];
+    }
+  };
+  sweep(store.dedup, DEDUP_AUX_INDEX, transferDedupOwnership);
+  sweep(store.tasks, TASK_AUX_INDEX, transferTaskOwnership);
+  return dropped.size;
+}
+
 export function clearCollectedData(store) {
   if (store._tx) throw new Error("cannot clear collected data inside a transaction");
   store.files = {};
@@ -705,9 +739,18 @@ function emptyAggregate(meta) {
   };
 }
 
+function disabledSourceIds(store) {
+  const sources = Array.isArray(store.config?.sources) ? store.config.sources : [];
+  return new Set(sources.filter((source) => source?.enabled === false).map((source) => source.id));
+}
+
 export function snapshotRows(store) {
   const rows = new Map();
+  // A disabled source keeps its collected history; it is only hidden, so
+  // turning it back on restores usage whose logs have since been deleted.
+  const disabled = disabledSourceIds(store);
   for (const file of Object.values(store.files)) {
+    if (disabled.has(file.sourceId)) continue;
     for (const row of file.rows ?? []) {
       const key = rowKey(row);
       let aggregate = rows.get(key);

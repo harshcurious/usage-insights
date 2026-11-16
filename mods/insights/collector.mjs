@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readPresentationCache } from "./core/cache.mjs";
-import { migrateLoadedConfig, normalizeConfig, sourcesSignature } from "./core/config.mjs";
+import { migrateLoadedConfig, normalizeConfig } from "./core/config.mjs";
 import {
   bumpFence,
   readEffectiveFence,
@@ -23,6 +23,7 @@ import { scanSources } from "./core/scan.mjs";
 import { progressWriter, readLiveProgress } from "./core/progress.mjs";
 import {
   clearCollectedData,
+  dropFileEntries,
   emptyScanState,
   ensureStoreMeta,
   loadStore,
@@ -31,6 +32,7 @@ import {
   storeGeneration,
 } from "./core/store.mjs";
 import {
+  expandHome,
   isLockBusyError,
   readStoreLockInfo,
   sleep,
@@ -311,6 +313,55 @@ async function runWithStoreLock(
       await sleep(40);
     }
   }
+}
+
+function sourceParseSignature(source) {
+  return JSON.stringify({ adapter: source.adapter, mapping: source.mapping ?? null });
+}
+
+async function resolvedRoots(roots, home) {
+  const out = new Set();
+  for (const root of roots ?? []) {
+    const expanded = expandHome(root, home);
+    if (!expanded) continue;
+    out.add(expanded);
+    try { out.add(await realpath(expanded)); } catch { /* a missing root covers nothing new */ }
+  }
+  return [...out];
+}
+
+function underRoot(filePath, root) {
+  if (typeof filePath !== "string") return false;
+  if (filePath === root) return true;
+  return filePath.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
+}
+
+/**
+ * Which collected files a configuration change invalidates, as a predicate
+ * over file entries, or null when none. Turning a source on or off keeps its
+ * history (snapshots hide disabled sources). A source that was removed, or
+ * whose adapter or mapping changed, loses its files; a source whose roots
+ * changed loses only the files no longer under any of its roots. Agents
+ * delete old transcripts, so anything dropped here cannot be re-collected.
+ */
+export async function staleSourceFiles(previous, next, home) {
+  const after = new Map((next?.sources ?? []).map((source) => [source.id, source]));
+  const rules = new Map();
+  for (const old of previous?.sources ?? []) {
+    const current = after.get(old.id);
+    if (!current || sourceParseSignature(old) !== sourceParseSignature(current)) {
+      rules.set(old.id, null);
+    } else if (JSON.stringify(old.roots) !== JSON.stringify(current.roots)) {
+      rules.set(old.id, await resolvedRoots(current.roots, home));
+    }
+  }
+  if (rules.size === 0) return null;
+  return (entry) => {
+    if (!rules.has(entry?.sourceId)) return false;
+    const roots = rules.get(entry.sourceId);
+    if (roots === null) return true;
+    return !roots.some((root) => underRoot(entry.path, root));
+  };
 }
 
 async function removeStalePendingFile(storePath, store, now) {
@@ -638,8 +689,9 @@ async function configureStore(
       try {
         const previousStatus = store.scan.status;
         const configChanged = JSON.stringify(store.config) !== JSON.stringify(config);
-        const mappingsChanged = sourcesSignature(store.config) !== sourcesSignature(config);
-        const cleared = mappingsChanged || rebuild;
+        const sourcesChanged = JSON.stringify(store.config.sources) !== JSON.stringify(config.sources);
+        const stale = rebuild ? null : await staleSourceFiles(store.config, config, home);
+        const cleared = rebuild;
         if (cleared) {
           clearCollectedData(store);
           store.scan = emptyScanState();
@@ -647,6 +699,13 @@ async function configureStore(
           store.scan.startedAt = new Date(now()).toISOString();
           store.lastCompletedScanAt = null;
           dirty = true;
+        } else if (stale) {
+          if (dropFileEntries(store, stale) > 0) dirty = true;
+          const pending = store.scan.pendingFile;
+          if (pending && stale(pending)) {
+            store.scan.pendingFile = null;
+            dirty = true;
+          }
         }
         if (configChanged) {
           store.config = config;
@@ -655,7 +714,7 @@ async function configureStore(
         applied = true;
         // Persist accepted config first. Config acceptance is never reported as a
         // completed scan; retained committed data keeps its completed timestamp.
-        const acceptedComplete = !cleared && previousStatus === "complete";
+        const acceptedComplete = !cleared && !sourcesChanged && previousStatus === "complete";
         const acceptedIso = new Date(now()).toISOString();
         if (dirty) {
           store.scan.generation = store.generation;
