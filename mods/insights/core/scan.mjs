@@ -795,12 +795,22 @@ function openCodeInt(value) {
 const OPENCODE_PARSER_VERSION = 4;
 
 /**
- * OpenCode stores sessions in one SQLite database. Messages are immutable
- * once completed and each row that made a model call carries canonical
- * tokens, so a full re-read through the max-upsert dedup is exact. The WAL
- * file changes on every write while the main database may not, so the
- * checkpoint fingerprint covers both files.
+ * OpenCode stores sessions in one SQLite database. Each row that made a model
+ * call carries canonical tokens, and usage is a max-upsert per message id, so
+ * re-reading a row is exact. The WAL file changes on every write while the
+ * main database may not, so the checkpoint fingerprint covers both files.
+ *
+ * Re-reading every message on each change re-parses the whole history (tens
+ * of MB of JSON) on every refresh while OpenCode runs. When the table records
+ * time_updated, later scans read only rows updated since the last one, minus
+ * a margin for writes that commit after a newer row was already seen.
  */
+const OPENCODE_UPDATE_MARGIN_MS = 5 * 60 * 1000;
+
+function tableColumns(db, table) {
+  return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name));
+}
+
 function openCodeSelect(db) {
   const tables = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
@@ -813,10 +823,18 @@ function openCodeSelect(db) {
     const join = tables.has("session_v2")
       ? "LEFT JOIN session_v2 s ON s.id = m.session_id"
       : "";
-    return `SELECT m.id AS id, m.session_id AS session_id, m.time_created AS time_created, m.data AS data, ${directory} FROM session_message m ${join}`;
+    const updated = tableColumns(db, "session_message").has("time_updated") ? "m.time_updated" : null;
+    return {
+      sql: `SELECT m.id AS id, m.session_id AS session_id, m.time_created AS time_created, ${updated ?? "NULL"} AS time_updated, m.data AS data, ${directory} FROM session_message m ${join}`,
+      updated,
+    };
   }
   if (tables.has("message")) {
-    return "SELECT session_id, id, time_created, data, NULL AS directory FROM message";
+    const updated = tableColumns(db, "message").has("time_updated") ? "time_updated" : null;
+    return {
+      sql: `SELECT session_id, id, time_created, ${updated ?? "NULL"} AS time_updated, data, NULL AS directory FROM message`,
+      updated,
+    };
   }
   return null;
 }
@@ -892,19 +910,32 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
   }
   const now = nowFn(options);
   let rowsSeen = 0;
+  let incremental = false;
+  let newestUpdate = 0;
   try {
     // Never open an external source writable, including on recovery errors.
     db = new sqlite.DatabaseSync(filePath, { readOnly: true });
     const select = openCodeSelect(db);
     if (!select) throw new Error("no message table found");
-    const records = db.prepare(select).iterate();
-    resetFileEntry(store, entry);
+    const watermark = Number(entry.state.opencodeWatermark);
+    incremental = Boolean(select.updated)
+      && entry.state.opencodeParserVersion === OPENCODE_PARSER_VERSION
+      && entry.dev === String(dbStat.dev)
+      && entry.ino === String(dbStat.ino)
+      && Number.isFinite(watermark) && watermark > 0;
+    const records = incremental
+      ? db.prepare(`${select.sql} WHERE ${select.updated} >= ?`).iterate(watermark - OPENCODE_UPDATE_MARGIN_MS)
+      : db.prepare(select.sql).iterate();
+    if (!incremental) resetFileEntry(store, entry);
     delete entry.state.unsupported;
+    newestUpdate = incremental ? watermark : 0;
     for (const record of records) {
       if (stopRequested(options) || (rowsSeen > 0 && deadlineReached(options, now()))) {
         throw new ScanStopError("budget");
       }
       rowsSeen += 1;
+      const updatedAt = Number(record.time_updated);
+      if (Number.isFinite(updatedAt) && updatedAt > newestUpdate) newestUpdate = updatedAt;
       let data;
       try {
         data = JSON.parse(record.data);
@@ -976,7 +1007,12 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
   entry.mtimeMs = dbStat.mtimeMs;
   entry.state.opencodeFingerprint = fingerprint;
   entry.state.opencodeParserVersion = OPENCODE_PARSER_VERSION;
-  entry.state.opencodeMalformedRows = malformedRows;
+  if (newestUpdate > 0) entry.state.opencodeWatermark = newestUpdate;
+  else delete entry.state.opencodeWatermark;
+  // An incremental pass sees only recent rows; keep the full read's count.
+  entry.state.opencodeMalformedRows = incremental
+    ? Math.max(Number(entry.state.opencodeMalformedRows) || 0, malformedRows)
+    : malformedRows;
   if (malformedRows) sink.warn(`opencode ${filePath}: ${malformedRows} malformed message rows were skipped.`);
   stats.filesRead += 1;
   stats.bytesRead += dbStat.size + (walStat?.size ?? 0);

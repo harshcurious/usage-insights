@@ -168,3 +168,40 @@ test("OpenCode adapter skips a missing database without errors", async () => {
   assert.equal(snapshot.rows.length, 0);
   assert.equal(snapshot.stats.errors, 0);
 });
+
+test("OpenCode session_message databases are re-read incrementally by time_updated", async (t) => {
+  const context = await env();
+  t.after(() => rm(context.root, { recursive: true, force: true }));
+  context.db.exec(`CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+    time_created INTEGER, time_updated INTEGER, data TEXT)`);
+  context.db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT)");
+  context.db.prepare("INSERT INTO session_v2 VALUES (?, ?)").run("ses", "/repo/v2");
+  const old = 1790000000000;
+  const insert = context.db.prepare("INSERT INTO session_message VALUES (?, 'ses', 'assistant', ?, ?, ?, ?)");
+  insert.run("old", 1, old, old, assistantMessage("old", { tokens: { input: 100, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }));
+  // "live" is an hour newer, so "old" falls outside the re-read margin.
+  insert.run("live", 2, old + 3_600_000, old + 3_600_000, assistantMessage("live", { tokens: { input: 10, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }));
+  context.db.close();
+
+  const input = (snap) => snap.rows.filter((row) => row.harness === "opencode")
+    .reduce((sum, row) => sum + row.tokens.input, 0);
+  const first = await snapshot(context);
+  assert.equal(input(first), 110);
+  assert.equal(first.rows.find((row) => row.harness === "opencode").project, "/repo/v2");
+
+  const db = new DatabaseSync(path.join(context.share, "opencode.db"));
+  const later = old + 2 * 3_600_000;
+  // An old row edited without a newer time_updated is outside the window.
+  db.prepare("UPDATE session_message SET data = ? WHERE id = 'old'")
+    .run(assistantMessage("old", { tokens: { input: 999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }));
+  // A streaming row grows and is stamped; a new row arrives.
+  db.prepare("UPDATE session_message SET data = ?, time_updated = ? WHERE id = 'live'")
+    .run(assistantMessage("live", { tokens: { input: 30, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }), later);
+  db.prepare("INSERT INTO session_message VALUES ('new', 'ses', 'assistant', 3, ?, ?, ?)")
+    .run(later, later, assistantMessage("new", { tokens: { input: 5, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }));
+  db.close();
+
+  const second = await snapshot(context);
+  assert.equal(second.stats.filesRead, 1);
+  assert.equal(input(second), 100 + 30 + 5, "only rows updated since the last scan were read");
+});
