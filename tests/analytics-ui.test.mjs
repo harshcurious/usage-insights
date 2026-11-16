@@ -1473,6 +1473,20 @@ test("a prepare error without a dashboard is shown once, not as a banner and a c
   assert.equal(texts.filter((text) => text === "prepare failed: boom").length, 1);
 });
 
+test("an unknown period command leaves the period unchanged", () => {
+  useHerdr();
+  const instance = blankInstance();
+  instance.period = "month";
+  let scheduled = 0;
+  instance.scheduleDashboard = () => { scheduled += 1; };
+  instance.setPeriod("fortnight", liveCx().cx);
+  assert.equal(instance.period, "month");
+  assert.equal(scheduled, 0);
+  instance.setPeriod("week", liveCx().cx);
+  assert.equal(instance.period, "week");
+  assert.equal(scheduled, 1);
+});
+
 test("a hung prepare times out into a retryable dashboard error", async () => {
   const { todayKey } = analytics;
   const snapshot = savedSnapshot();

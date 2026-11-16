@@ -19,6 +19,7 @@ import {
   isPresentation,
   normalizeConfig,
   periodRange,
+  PERIODS,
   projectName,
   todayKey,
   weekdayLabels,
@@ -1528,6 +1529,8 @@ export default class Insights extends View {
   }
 
   setPeriod(period, cx) {
+    // Key commands are free text (insights.period.<x>); ignore unknown periods.
+    if (!PERIODS.includes(period)) return;
     this.period = period;
     const today = todayKey();
     const config = normalizeConfig(this.snapshot?.config ?? {});
