@@ -1,0 +1,17 @@
+{
+  "name": "usage-insights",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first token usage insights for Herdr coding-agent sessions (fork of GaganSD/coding-agent-toolkit herdr-insights).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "install:local": "node scripts/install.mjs",
+    "uninstall:local": "node scripts/uninstall.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node tools/check.mjs"
+  }
+}
