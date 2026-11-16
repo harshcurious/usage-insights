@@ -40,9 +40,9 @@ import {
   withStoreLock,
 } from "./core/util.mjs";
 
-// Leave room for startup, store load, save, and presentation derivation inside
-// Herdr's fixed 30s exec budget. A partial slice returns committed data and the
-// UI continues automatically.
+// Keep each foreground slice short so the dashboard stays responsive; the UI
+// gives snapshot 45s and configure 60s (lock wait + slice + store load/save).
+// A partial slice returns committed data and the UI continues automatically.
 export const DEFAULT_SCAN_BUDGET_MS = 15_000;
 const FOREGROUND_LOCK_WAIT_MS = 2_000;
 const CONFIGURE_LOCK_WAIT_MS = 20_000;

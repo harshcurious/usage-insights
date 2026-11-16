@@ -1429,7 +1429,7 @@ for (const kind of ["refresh", "save"]) {
     start();
     await flush();
     assert.equal(pending.length, 1);
-    const watchdog = calls.after.find((timer) => timer.ms === 35_000 && !timer.cancelled);
+    const watchdog = calls.after.find((timer) => timer.ms === (kind === "refresh" ? 50_000 : 65_000) && !timer.cancelled);
     watchdog.fn();
     assert.equal(instance.busy(), false);
     start();

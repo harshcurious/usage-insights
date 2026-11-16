@@ -203,7 +203,13 @@ const MAX_FACET_OPTIONS = 250;
 const DEFAULT_NODE = "node";
 const RUNTIME_FILE = "mods/insights/runtime.json";
 const PRESENTER_FILE = "mods/insights/presenter.mjs";
-const ACTIVITY_TIMEOUT_MS = 35_000;
+// Herdr's exec defaults to 30s. A save can wait 20s for the store lock and
+// then scan for 15s, so each helper gets its own budget; the watchdogs are a
+// backstop a little past it.
+const PREPARE_TIMEOUT_MS = 30_000;
+const REFRESH_TIMEOUT_MS = 45_000;
+const SAVE_TIMEOUT_MS = 60_000;
+const WATCHDOG_GRACE_MS = 5_000;
 
 const HEAT_COLORS = {
   blue: {
@@ -927,7 +933,8 @@ export default class Insights extends View {
     const field = kind === "refresh" ? "refreshWatchdog" : "saveWatchdog";
     try { this[field]?.cancel(); } catch { /* already gone */ }
     const generation = this.activityGeneration;
-    this[field] = cx.timer.after(ACTIVITY_TIMEOUT_MS, (timerCx) => {
+    const limitMs = kind === "refresh" ? REFRESH_TIMEOUT_MS : SAVE_TIMEOUT_MS;
+    this[field] = cx.timer.after(limitMs + WATCHDOG_GRACE_MS, (timerCx) => {
       if (generation !== this.activityGeneration) return;
       this[field] = null;
       this.activityGeneration = (this.activityGeneration ?? 0) + 1;
@@ -936,12 +943,12 @@ export default class Insights extends View {
       if (kind === "refresh" && this.loading) {
         this.loading = false;
         this.cancelProgress();
-        this.error = "Refresh timed out after 35 seconds. Retry to try again.";
+        this.error = `Refresh timed out after ${Math.round(limitMs / 1000)} seconds. Retry to try again.`;
         timerCx.notify();
       }
       if (kind === "save" && this.saving) {
         this.saving = false;
-        this.saveError = "Saving timed out after 35 seconds. Retry to try again.";
+        this.saveError = `Saving timed out after ${Math.round(limitMs / 1000)} seconds. Your settings may already be saved; refresh to check.`;
         timerCx.notify();
       }
     });
@@ -997,7 +1004,7 @@ export default class Insights extends View {
     const generation = (this.dashboardGeneration ?? 0) + 1;
     this.dashboardGeneration = generation;
     try { this.dashboardWatchdog?.cancel(); } catch { /* already gone */ }
-    this.dashboardWatchdog = cx.timer.after(ACTIVITY_TIMEOUT_MS, (timerCx) => {
+    this.dashboardWatchdog = cx.timer.after(PREPARE_TIMEOUT_MS + WATCHDOG_GRACE_MS, (timerCx) => {
       this.dashboardWatchdog = null;
       if (generation !== this.dashboardGeneration) return;
       this.dashboardGeneration += 1;
@@ -1018,7 +1025,7 @@ export default class Insights extends View {
           this.storePath(),
           "--options",
           JSON.stringify(options),
-        ]);
+        ], { timeout: PREPARE_TIMEOUT_MS });
         if (result.code !== 0) throw new Error(resultError(result));
         const payload = parseSnapshot(result.stdout);
         if (generation !== this.dashboardGeneration) return;
@@ -1082,7 +1089,7 @@ export default class Insights extends View {
           home(),
           "--options",
           JSON.stringify(options),
-        ]);
+        ], { timeout: REFRESH_TIMEOUT_MS });
         if (result.code !== 0) throw new Error(resultError(result));
         payload = parseSnapshot(result.stdout);
       } catch (error) {
@@ -1386,7 +1393,7 @@ export default class Insights extends View {
           JSON.stringify(config),
           "--options",
           JSON.stringify(options),
-        ]);
+        ], { timeout: SAVE_TIMEOUT_MS });
         if (result.code !== 0) throw new Error(resultError(result));
         payload = parseSnapshot(result.stdout);
       } catch (error) {
