@@ -164,6 +164,8 @@ Keep Herdr running for toolbar installation/removal; never start a second instan
 
 **Watch out:** Canonical total is input + output + cacheRead + cacheWrite;
 input is uncached, output already includes reasoning. Never add reasoning twice.
+OpenCode is the exception: its `tokens.output` excludes `tokens.reasoning`, so
+its adapter adds reasoning into output (reasoning can exceed output there).
 Reconcile cumulative Codex counters and alternate record formats; deduplicate fork
 copies and Claude streamed duplicates. Count Pi's reported usage carriers once,
 including tool-result, standalone usage, compaction, and branch-summary events.

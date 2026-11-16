@@ -90,7 +90,8 @@ test("OpenCode adapter reads assistant usage from the SQLite store", async () =>
     cacheWrite: sum.cacheWrite + row.tokens.cacheWrite,
     reasoning: sum.reasoning + row.tokens.reasoning,
   }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 });
-  assert.deepEqual(totals, { input: 200, output: 80, cacheRead: 400, cacheWrite: 40, reasoning: 20 });
+  // OpenCode reports reasoning beside output; it is folded into output.
+  assert.deepEqual(totals, { input: 200, output: 100, cacheRead: 400, cacheWrite: 40, reasoning: 20 });
   const grok = rows.find((row) => row.model === "global.xai.grok-4.6");
   assert.equal(grok.provider, "bedrock-mantle");
   assert.equal(grok.project, "/repo/insights");
@@ -114,8 +115,23 @@ test("OpenCode adapter reads assistant usage from the SQLite store", async () =>
   const third = await snapshot(context);
   const sesOne = third.rows.filter((row) => row.harness === "opencode" && row.session === "ses-1");
   const sesOneTotals = sesOne.reduce((sum, row) => sum + row.tokens.input + row.tokens.output, 0);
-  assert.equal(sesOneTotals, 100 + 40 + 50 + 10);
+  assert.equal(sesOneTotals, 100 + 50 + 50 + 10);
   assert.equal(third.stats.filesRead, 1);
+
+  // A step whose only tokens are reasoning still counts.
+  const db2 = new DatabaseSync(path.join(context.share, "opencode.db"));
+  db2.prepare("INSERT INTO message VALUES (?, ?, ?, ?)").run(
+    "m-4",
+    "ses-1",
+    1790400300000,
+    assistantMessage("m-4", { tokens: { input: 0, output: 0, reasoning: 7, cache: { read: 0, write: 0 } } }),
+  );
+  db2.close();
+  const fourth = await snapshot(context);
+  const reasoningOnly = fourth.rows
+    .filter((row) => row.harness === "opencode" && row.session === "ses-1")
+    .reduce((sum, row) => sum + row.tokens.reasoning, 0);
+  assert.equal(reasoningOnly, 10 + 7);
 });
 
 test("OpenCode malformed message rows report bounded warnings, including on unchanged scans", async (t) => {

@@ -791,7 +791,8 @@ function openCodeInt(value) {
 // The OpenCode schema moved messages from a `message` table to
 // `session_message` (with the session's directory on `session_v2`). Bumping
 // this re-reads databases whose rows were collected through the older query.
-const OPENCODE_PARSER_VERSION = 3;
+// Version 4 folds reasoning into output (see the token mapping below).
+const OPENCODE_PARSER_VERSION = 4;
 
 /**
  * OpenCode stores sessions in one SQLite database. Messages are immutable
@@ -922,7 +923,9 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
       }
       const tokens = {
         input: openCodeInt(data.tokens.input),
-        output: openCodeInt(data.tokens.output),
+        // OpenCode reports reasoning beside output, not inside it; every other
+        // adapter (and the dashboard) treats reasoning as part of output.
+        output: openCodeInt(data.tokens.output) + openCodeInt(data.tokens.reasoning),
         cacheRead: openCodeInt(data.tokens.cache?.read),
         cacheWrite: openCodeInt(data.tokens.cache?.write),
         reasoning: openCodeInt(data.tokens.reasoning),
