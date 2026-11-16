@@ -1841,12 +1841,12 @@ export default class Insights extends View {
       .text_color(c.dim).child(label));
 
     const cellElement = (dayCell) => {
-      const color = dayCell.future
+      const color = dayCell.inactive
         ? c.muted
         : dayCell.level > 0 ? heatColor(dayCell.level, palette, dark) : c.muted;
       return div().id(`ins-cell-${dayCell.date}`).size(cell).flex_none().rounded(2).bg(color)
-        .opacity(dayCell.future ? 0.3 : 1)
-        .when(!dayCell.future, (el) => el.cursor_pointer()
+        .opacity(dayCell.inactive ? 0.3 : 1)
+        .when(!dayCell.inactive, (el) => el.cursor_pointer()
           .hover((style) => style.opacity(0.8))
           .on_click((_event, clickCx) => {
             this.selectedDay = dayCell.date;

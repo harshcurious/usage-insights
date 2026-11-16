@@ -557,3 +557,23 @@ test("dashboard cache reuses facet-aware derivation until snapshot or state chan
   cache.read(value, options);
   assert.equal(calls, 11);
 });
+
+test("month heatmap shows days before the period as inactive, not as zero usage", () => {
+  const value = snapshot({
+    config: { ...snapshot().config, weekStartsOn: 1 },
+    rows: [
+      row({ day: "2026-10-28", session: "s0", model: "model-a", tokens: { input: 500, output: 0, cacheRead: 0, cacheWrite: 0 } }),
+      row({ day: "2026-11-03", session: "s1", model: "model-a", tokens: { input: 40, output: 0, cacheRead: 0, cacheWrite: 0 } }),
+    ],
+  });
+  const derived = deriveDashboard(value, {
+    period: "month", year: 2026, heatmapMode: "daily", selectedDay: "2026-10-28", today: "2026-11-16",
+  });
+  const october = derived.heatmap.cells.filter((cell) => cell.date < "2026-11-01");
+  assert.equal(october[0].date, "2026-10-26", "the first week is padded back to Monday");
+  assert.ok(october.every((cell) => cell.inactive && cell.outside && cell.tooltip === "" && cell.level === 0));
+  assert.notEqual(derived.selectedDay, "2026-10-28", "a day outside the period cannot stay selected");
+  const november = derived.heatmap.cells.find((cell) => cell.date === "2026-11-03");
+  assert.equal(november.inactive, false);
+  assert.equal(november.daily, 40);
+});

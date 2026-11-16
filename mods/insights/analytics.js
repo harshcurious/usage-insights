@@ -810,6 +810,9 @@ export function buildHeatmap(rows, options = {}) {
   const endWeekStart = startOfWeek(endDay, weekStartsOn);
   const startDay = addDays(endWeekStart, -(weekCount - 1) * 7);
   const lastDay = addDays(endWeekStart, 6);
+  // A period view pads its first week back to the week start; those days
+  // belong to the previous period and are shown inactive, not as zero usage.
+  const rangeStart = isDay(options.rangeStart) ? options.rangeStart : null;
 
   const daily = new Map();
   const daySessions = new Map();
@@ -862,6 +865,7 @@ export function buildHeatmap(rows, options = {}) {
       const daySessionCount = daySessions.get(day)?.size ?? 0;
       const value = mode === "weekly" ? weekTotal : mode === "cumulative" ? cumulativeTokens : dailyTokens;
       const future = day > endDay;
+      const outside = rangeStart !== null && day < rangeStart;
       const cell = {
         date: day,
         weekStart,
@@ -874,6 +878,8 @@ export function buildHeatmap(rows, options = {}) {
         weekSessions: weekSessions.size,
         cumulativeSessions: cumulativeSessions.size,
         future,
+        outside,
+        inactive: future || outside,
         level: 0,
       };
       weekDays.push(cell);
@@ -884,11 +890,11 @@ export function buildHeatmap(rows, options = {}) {
 
   let maxValue = 0;
   for (const cell of cells) {
-    if (!cell.future && cell.value > maxValue) maxValue = cell.value;
+    if (!cell.inactive && cell.value > maxValue) maxValue = cell.value;
   }
   for (const cell of cells) {
-    cell.level = cell.future ? 0 : intensityLevel(cell.value, maxValue);
-    cell.tooltip = cell.future ? "" : heatmapTooltip(cell, mode);
+    cell.level = cell.inactive ? 0 : intensityLevel(cell.value, maxValue);
+    cell.tooltip = cell.inactive ? "" : heatmapTooltip(cell, mode);
   }
 
   const months = [];
@@ -959,6 +965,7 @@ export function deriveDashboard(snapshot, options = {}) {
   const streaks = streakStats(rows, { today, includeCache });
   const heatmap = buildHeatmap(periodRows, {
     ...(periodWeeks ? { weeks: periodWeeks } : {}),
+    rangeStart: range.start,
     endDay: range.end,
     weekStartsOn: config.weekStartsOn,
     mode: heatmapMode,
@@ -977,7 +984,7 @@ export function deriveDashboard(snapshot, options = {}) {
     includeCache,
   });
 
-  const selectedInRange = heatmap.cells.find((cell) => cell.date === settings.selectedDay && !cell.future);
+  const selectedInRange = heatmap.cells.find((cell) => cell.date === settings.selectedDay && !cell.inactive);
   const selectedDay = selectedInRange ? settings.selectedDay : heatmap.range.dataEnd;
   const selectedRows = dimensionRows.filter((row) => row.day === selectedDay);
   const selectedTotals = sumTokens(selectedRows, includeCache);
@@ -1319,7 +1326,7 @@ export function createDashboardCache(compute = deriveDashboard) {
 }
 
 export function heatmapTooltip(cell, mode = "daily") {
-  if (!cell || cell.future) return "";
+  if (!cell || cell.inactive) return "";
   const exact = formatInt(cell.value);
   if (mode === "weekly") {
     return `Week of ${dayLabel(cell.weekStart, { year: false })}: ${exact} tokens · ${formatInt(cell.weekSessions)} sessions`;
