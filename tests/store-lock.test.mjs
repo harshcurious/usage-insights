@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { workerClaimActive } from "../mods/insights/core/fence.mjs";
-import { isLocalOwner, machineId, withStoreLock } from "../mods/insights/core/util.mjs";
+import { isLocalOwner, machineId, sweepStoreLeftovers, withStoreLock } from "../mods/insights/core/util.mjs";
 
 const DEAD_PID = 999_999_999;
 
@@ -72,4 +72,51 @@ test("worker claims recognise this machine across hostname changes", (t) => {
   assert.equal(workerClaimActive(renamed), false, "a dead local worker's claim is not active");
   assert.equal(workerClaimActive({ host: "renamed-host.local", pid: DEAD_PID }), true,
     "a claim without a machine id from another host fails closed");
+});
+
+test("leftover temp, lock and reap files are swept once old; three corrupt backups are kept", async (t) => {
+  const storePath = await storeDir(t);
+  const dir = path.dirname(storePath);
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const oldNames = [
+    ".insights.json.tmp-123-1700000000000-abcd1234",
+    "insights.json.worker.json.123-abcdef012345.reap",
+  ];
+  for (const name of oldNames) await writeFile(path.join(dir, name), "x");
+  await mkdir(path.join(dir, ".insights.json.lock.acquire-tok"));
+  await mkdir(path.join(dir, "insights.json.lock.release-tok"));
+  await writeFile(path.join(dir, "insights.json.lock.release-tok", "owner-tok.json"), "{}");
+  for (const name of [...oldNames, ".insights.json.lock.acquire-tok", "insights.json.lock.release-tok"]) {
+    await utimes(path.join(dir, name), old, old);
+  }
+  const fresh = ".insights.json.tmp-456-1700000000001-beef0000";
+  await writeFile(path.join(dir, fresh), "x");
+  const unrelated = ".other.json.tmp-123-1700000000000-abcd1234";
+  await writeFile(path.join(dir, unrelated), "x");
+  await utimes(path.join(dir, unrelated), old, old);
+  for (const stamp of ["2026-01-01", "2026-02-01", "2026-03-01", "2026-04-01", "2026-05-01"]) {
+    await writeFile(path.join(dir, `insights.json.corrupt-${stamp}`), "{");
+  }
+
+  await sweepStoreLeftovers(storePath);
+
+  const left = (await readdir(dir)).sort();
+  assert.deepEqual(left, [
+    fresh,
+    unrelated,
+    "insights.json.corrupt-2026-03-01",
+    "insights.json.corrupt-2026-04-01",
+    "insights.json.corrupt-2026-05-01",
+  ].sort());
+});
+
+test("taking the store lock sweeps old leftovers", async (t) => {
+  const storePath = await storeDir(t);
+  const dir = path.dirname(storePath);
+  const stale = path.join(dir, ".insights.json.tmp-1-1-aa");
+  await writeFile(stale, "x");
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  await utimes(stale, old, old);
+  await withStoreLock(storePath, async () => {}, { timeoutMs: 2_000 });
+  assert.equal((await readdir(dir)).includes(".insights.json.tmp-1-1-aa"), false);
 });

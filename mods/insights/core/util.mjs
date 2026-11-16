@@ -396,6 +396,9 @@ export async function withStoreLock(
     throw error;
   }
 
+  // The writer lock is held: tidy what killed processes left behind.
+  await sweepStoreLeftovers(storePath).catch(() => {});
+
   try {
     return await callback();
   } finally {
@@ -410,6 +413,45 @@ export async function withStoreLock(
         await rmdir(lockPath).catch(() => {});
       }
     }
+  }
+}
+
+export const LEFTOVER_MIN_AGE_MS = 60 * 60 * 1000;
+export const CORRUPT_BACKUPS_KEPT = 3;
+
+/**
+ * Remove what killed or crashed processes leave beside the store: partial
+ * atomic-write temp files, lock staging and release directories, and
+ * quarantined worker claims, once an hour old (a live writer's are seconds
+ * old). Keep only the newest corrupt-store backups. Only names derived from
+ * the store's own file name are touched.
+ */
+export async function sweepStoreLeftovers(storePath, { now = Date.now() } = {}) {
+  const dir = path.dirname(storePath);
+  const base = path.basename(storePath);
+  const leftover = (name) => (
+    (name.startsWith(`.${base}`) && /\.tmp-\d+-\d+-[0-9a-f]+$/.test(name))
+    || name.startsWith(`.${base}.lock.acquire-`)
+    || name.startsWith(`${base}.lock.release-`)
+    || (name.startsWith(base) && name.endsWith(".reap"))
+  );
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const name of names.filter(leftover)) {
+    const target = path.join(dir, name);
+    try {
+      const info = await stat(target);
+      if (now - info.mtimeMs < LEFTOVER_MIN_AGE_MS) continue;
+      await rm(target, { recursive: true, force: true });
+    } catch { /* best effort */ }
+  }
+  const backups = names.filter((name) => name.startsWith(`${base}.corrupt-`)).sort();
+  for (const name of backups.slice(0, Math.max(0, backups.length - CORRUPT_BACKUPS_KEPT))) {
+    await rm(path.join(dir, name), { force: true }).catch(() => {});
   }
 }
 
