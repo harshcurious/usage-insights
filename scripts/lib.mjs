@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +35,32 @@ export function sha256(data) {
   return createHash("sha256").update(data).digest("hex");
 }
 
-export function createRuntimeFile(nodePath = process.execPath) {
+/**
+ * The Node path to record in runtime.json. `process.execPath` is often a
+ * version-specific path (Homebrew's Cellar/node/<version>/bin/node) that
+ * disappears on upgrade; prefer a `node` on PATH that resolves to the same
+ * binary (Homebrew's bin/node symlink), which keeps working.
+ */
+export function stableNodePath({
+  execPath = process.execPath,
+  pathEnv = process.env.PATH ?? "",
+  realpath = (file) => realpathSync(file),
+} = {}) {
+  let target;
+  try { target = realpath(execPath); } catch { return execPath; }
+  const binary = path.basename(execPath);
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue;
+    const candidate = path.join(dir, binary);
+    if (candidate === execPath) return execPath;
+    try {
+      if (realpath(candidate) === target) return candidate;
+    } catch { /* not here */ }
+  }
+  return execPath;
+}
+
+export function createRuntimeFile(nodePath = stableNodePath()) {
   const data = Buffer.from(`${JSON.stringify({ node: nodePath })}\n`);
   return {
     absolute: null,

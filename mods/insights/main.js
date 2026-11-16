@@ -773,6 +773,31 @@ export default class Insights extends View {
     return `${appHome()}/${RUNTIME_FILE}`;
   }
 
+  /**
+   * Run a helper with the configured Node. A version-specific path (a
+   * Homebrew Cellar path, say) disappears when Node is upgraded; when it can
+   * no longer start, fall back to `node` on PATH and keep using that.
+   */
+  async execNode(args, options) {
+    const node = this.nodeBinary;
+    try {
+      return await exec(node, args, options);
+    } catch (error) {
+      if (node === DEFAULT_NODE || !/cannot start/i.test(String(error?.message ?? error))) throw error;
+      let result;
+      try {
+        result = await exec(DEFAULT_NODE, args, options);
+      } catch (fallbackError) {
+        throw new Error(`Node can't start from ${node} (${RUNTIME_FILE}) or from PATH: ${sanitizeError(fallbackError)}`, { cause: fallbackError });
+      }
+      if (this.nodeBinary === node) {
+        this.nodeBinary = DEFAULT_NODE;
+        console.warn(`Insights: ${node} from ${RUNTIME_FILE} can't start; using node from PATH.`);
+      }
+      return result;
+    }
+  }
+
   presenterPath() {
     return `${appHome()}/${PRESENTER_FILE}`;
   }
@@ -1046,7 +1071,7 @@ export default class Insights extends View {
     let task = null;
     task = cx.spawn(async (prepareCx) => {
       try {
-        const result = await exec(this.nodeBinary, [
+        const result = await this.execNode([
           this.presenterPath(),
           "prepare",
           "--store",
@@ -1108,7 +1133,7 @@ export default class Insights extends View {
       let payload = null;
       let failure = null;
       try {
-        const result = await exec(this.nodeBinary, [
+        const result = await this.execNode([
           presenter,
           "snapshot",
           "--store",
@@ -1412,7 +1437,7 @@ export default class Insights extends View {
       let payload = null;
       let failure = null;
       try {
-        const result = await exec(this.nodeBinary, [
+        const result = await this.execNode([
           presenter,
           "configure",
           "--store",

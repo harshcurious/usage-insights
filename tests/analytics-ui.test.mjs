@@ -357,7 +357,8 @@ test("native mod keeps timers and shell use inside the Herdr contract", () => {
   assert.doesNotMatch(mainSource, /--rebuild/);
   assert.match(mainSource, /readTextFile\(this\.runtimePath\(\)\)/);
   assert.match(mainSource, /mods\/insights\/runtime\.json/);
-  assert.equal((mainSource.match(/exec\(this\.nodeBinary, \[/g) ?? []).length, 3);
+  assert.equal((mainSource.match(/this\.execNode\(\[/g) ?? []).length, 3);
+  assert.equal((mainSource.match(/\bexec\((?:node|DEFAULT_NODE), args, options\)/g) ?? []).length, 2);
   assert.match(mainSource, /presenter\.mjs/);
   assert.match(mainSource, /"prepare"/);
   assert.match(mainSource, /timer\.after\(0/);
@@ -1436,6 +1437,25 @@ test("a selection following today moves at midnight and on New Year; a picked on
   instance.followToday("2027-01-02");
   assert.equal(instance.selectedDay, "2026-06-01", "a day the person picked stays");
   assert.equal(instance.year, 2026, "a year the person picked stays");
+});
+
+test("a Node path that can no longer start falls back to node on PATH", async () => {
+  const state = useHerdr({
+    execResult: (command) => {
+      if (command === "/gone/node") throw new Error("cannot start /gone/node: program not found");
+      return { code: 0, stdout: "ok", stderr: "" };
+    },
+  });
+  const instance = blankInstance();
+  instance.nodeBinary = "/gone/node";
+  const result = await instance.execNode(["presenter.mjs"], { timeout: 1_000 });
+  assert.equal(result.stdout, "ok");
+  assert.deepEqual(state.execCalls.map((call) => call.command), ["/gone/node", "node"]);
+  assert.equal(instance.nodeBinary, "node", "later helpers use the working node");
+
+  instance.nodeBinary = "/slow/node";
+  useHerdr({ execResult: () => { throw new Error("timed out"); } });
+  await assert.rejects(instance.execNode([], {}), /timed out/, "other failures are not retried");
 });
 
 test("a hung prepare times out into a retryable dashboard error", async () => {

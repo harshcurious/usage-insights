@@ -9,6 +9,7 @@ import {
   assertSupportedNodeVersion,
   collectSourceFiles,
   createRuntimeFile,
+  stableNodePath,
   dataDir,
   ensureDirectory,
   expandHome,
@@ -130,7 +131,7 @@ async function addParentIssues(targetDirectory, target, issues) {
 async function collectInstallSource(sourceRoot) {
   const source = await collectSourceFiles(sourceRoot);
   source.files = source.files.filter((file) => file.relative !== RUNTIME_NAME);
-  source.files.push(createRuntimeFile());
+  source.files.push(createRuntimeFile(stableNodePath()));
   source.files.sort((left, right) => left.relative.localeCompare(right.relative));
   return source;
 }
@@ -301,7 +302,7 @@ async function applyInstall(plan) {
         removed.length ? `, ${removed.length} stale removed` : ""
       }).`,
   );
-  console.log(`Generated ${RUNTIME_NAME} for Node ${process.execPath}.`);
+  console.log(`Generated ${RUNTIME_NAME} for Node ${stableNodePath()}.`);
   console.log(`Insights data stays at ${targetDataDirectory}; insights.json is untouched.`);
   for (const kept of keptStale) {
     console.warn(`Kept an owned file no longer in the source: ${kept}`);

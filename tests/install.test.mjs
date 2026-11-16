@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { isNodeVersionSupported } from "../scripts/lib.mjs";
+import { isNodeVersionSupported, stableNodePath } from "../scripts/lib.mjs";
 import {
   APP_FILES,
   DEFAULT_MOD_FILES,
@@ -34,7 +34,7 @@ import {
 
 const CHECK_SCRIPT = fileURLToPath(new URL("../tools/check.mjs", import.meta.url));
 
-function runtimeContent(nodePath = process.execPath) {
+function runtimeContent(nodePath = stableNodePath()) {
   return `${JSON.stringify({ node: nodePath })}\n`;
 }
 
@@ -211,7 +211,7 @@ test("runtime.json is generated from the installer Node, replaces a source copy,
   const runtimePath = path.join(appHome, "mods", "insights", RUNTIME_REL);
   assert.equal(await fs.readFile(runtimePath, "utf8"), runtimeContent());
   assert.deepEqual(JSON.parse(await fs.readFile(runtimePath, "utf8")), {
-    node: process.execPath,
+    node: stableNodePath(),
   });
   const manifest = await readJson(
     path.join(appHome, "data", "insights", "install-manifest.json"),
