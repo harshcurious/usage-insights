@@ -12,15 +12,15 @@ Reads local sessions from **Pi, Codex, Claude Code, OpenCode, and Antigravity**.
 
 Ask your agent:
 ```
-Read https://github.com/GaganSD/coding-agent-toolkit/blob/main/herdr-insights/INSTALL.md and install Insights following it.
+Read https://github.com/harshcurious/usage-insights/blob/main/INSTALL.md and install Insights following it.
 ```
 
 Or install from a checkout:
 
 ```sh
-git clone https://github.com/GaganSD/coding-agent-toolkit.git
-cd coding-agent-toolkit
-npm run install:local --prefix herdr-insights
+git clone https://github.com/harshcurious/usage-insights.git
+cd usage-insights
+npm run install:local
 ```
 
 With Herdr running, the installer checks the `insights` mod and adds an
@@ -54,6 +54,44 @@ personal layout clone composed by the installer, which wraps the native tabs
 without modifying them (see [INSTALL.md](INSTALL.md)).
 
 [RECIPE.md](RECIPE.md) is the self-contained rebuild brief required by Herdr.
-Developer tests, fixtures, and release validation live outside this distribution;
-see the repo's [development guide](../docs/herdr-insights-development.md). They are
-not installation steps.
+
+Tests and package checks run from the repository root (no dependencies):
+
+```sh
+npm test        # node --test tests/*.test.mjs
+npm run check   # validates mods/insights and the installer
+```
+
+## About this fork
+
+Usage Insights is a fork of **Insights** (`herdr-insights`) by
+[Gagan Devagiri](https://github.com/GaganSD), from
+[GaganSD/coding-agent-toolkit](https://github.com/GaganSD/coding-agent-toolkit/tree/main/herdr-insights),
+MIT licensed (see [LICENSE](LICENSE)). It is imported at upstream `522dce2` and
+flattened into its own repository. The mod ID stays `insights` and the install
+ownership name stays `herdr-insights`, so an existing install upgrades in place.
+
+Changes from upstream:
+
+- Toggling, re-rooting or remapping a source keeps collected history; only the
+  files a change invalidates are dropped, and disabled sources are hidden.
+- A corrupt store is replaced without losing settings; a store written by a
+  newer version is left untouched instead of being reset.
+- Locks and worker claims are recognised across hostname changes (macOS
+  renames `.local` hosts) by machine ID, so a renamed Mac no longer stays locked.
+- Refresh, prepare and save have explicit exec timeouts that cover their work.
+- OpenCode reasoning tokens are counted as output (its `tokens.output`
+  excludes them); OpenCode databases are read incrementally by `time_updated`,
+  including the newer `session_message` schema.
+- The selected day's detail follows the model/provider filters; the heatmap is
+  scoped to the period and greys out days before it; leaderboard changes show
+  one sign.
+- Dashboard polling backs off while the background indexer runs.
+- Leftover temp/lock files are swept; only three corrupt backups are kept.
+- Settings sync can no longer stall; the selected day/year follow today across
+  midnight and New Year; a prepare error shows once; unknown
+  `insights.period.<x>` commands are ignored; a removed default source stays
+  removed.
+- Survives Node upgrades: the installer records a stable `node` path (such as
+  Homebrew's `bin/node`) and the panel falls back to `node` on PATH when the
+  recorded binary is gone.

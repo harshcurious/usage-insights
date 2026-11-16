@@ -6,10 +6,12 @@ Use this existing build, not `RECIPE.md` (rebuilding).
 
 ## Install
 
-From the parent of `herdr-insights/`; no `npm install` needed:
+From a checkout of this repository; no `npm install` needed:
 
 ```sh
-npm run install:local --prefix herdr-insights
+git clone https://github.com/harshcurious/usage-insights.git
+cd usage-insights
+npm run install:local
 ```
 
 The installer checks `mods/insights` before copying it to the app home, which
@@ -31,8 +33,9 @@ local edits and any failed layout clone. Remove the app home's
 Long scans are expected. Foreground refreshes are bounded and auto-continue;
 giant zstd archives may finish in one managed local Node worker. Do not raise
 Herdr's exec timeout. Lock/claim files fail closed: never delete a live or
-foreign owner by age. Remove stale lock, `lock.acquire-*`, or quarantine
-leftovers only after proving no writer is running and rechecking first.
+foreign owner by age. The mod sweeps its own temp, `lock.acquire-*`,
+`lock.release-*` and `.reap` leftovers once they are an hour old and keeps
+the three newest `.corrupt-*` backups; don't remove them by hand.
 
 Node.js **22.15+** is required. A partial save updates `savedAt`/`lastScanAt`,
 not `lastCompletedScanAt`.

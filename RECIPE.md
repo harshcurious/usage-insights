@@ -73,10 +73,14 @@ Weekly heatmap mode repeats each week's total on every day in that week;
 cumulative mode includes all preceding history. A streak ending yesterday still
 counts as current. Show explicit loading, empty, and error states, never demo rows
 or invented zeros after failures. Settings saves validate before applying; simple
-controls preserve custom mappings. Changing source configuration invalidates the
-scan cache; palette/cache/week-start/refresh changes preserve collected history.
+controls preserve custom mappings. Changing a source drops only the cached files
+it invalidates (a removed source or changed adapter/mapping: all its files; new
+roots: files outside them; enabling/disabling: none, disabled sources are just
+hidden); palette/cache/week-start/refresh changes preserve collected history.
+A default source the person removed stays removed (the store's `sourceDefaults`
+records that the one-time default-source upgrade already ran).
 
-**Built from:** Put this distribution in `herdr-insights/`, with `RECIPE.md`,
+**Built from:** Put this distribution in its own folder, with `RECIPE.md`,
 `README.md`, `INSTALL.md`, `preview.png`, and `mods/insights/`. Keep developer
 tests, fixtures, and release-check tooling outside this distribution folder.
 Do not include a `layouts/` folder or keys snippet: no bindings are needed.
