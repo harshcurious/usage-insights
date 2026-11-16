@@ -1557,7 +1557,10 @@ export default class Insights extends View {
     const padding = width < 620 ? G.md : width < 900 ? G.lg : G.xl;
     const content = [this.header(c)];
     if (this.error && this.snapshot) content.push(this.errorBanner(c));
-    if (this.dashboardError && this.snapshot) content.push(this.dashboardErrorBanner(c));
+    // Without a dashboard yet, dashboardView's own card shows the error and Retry.
+    if (this.dashboardError && this.snapshot && (this.dashboard || this.showSettings)) {
+      content.push(this.dashboardErrorBanner(c));
+    }
     if (!this.snapshot) content.push(this.initialState(c));
     else if (this.showSettings) content.push(this.settingsView(c));
     else content.push(this.dashboardView(c));

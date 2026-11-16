@@ -1458,6 +1458,21 @@ test("a Node path that can no longer start falls back to node on PATH", async ()
   await assert.rejects(instance.execNode([], {}), /timed out/, "other failures are not retried");
 });
 
+test("a prepare error without a dashboard is shown once, not as a banner and a card", () => {
+  useHerdr();
+  const instance = blankInstance();
+  instance.snapshot = savedSnapshot();
+  instance.dashboard = null;
+  instance.dashboardError = "prepare failed: boom";
+  const texts = [];
+  const walk = (node) => {
+    if (typeof node === "string") texts.push(node);
+    for (const child of node?.childNodes ?? []) walk(child);
+  };
+  walk(instance.render());
+  assert.equal(texts.filter((text) => text === "prepare failed: boom").length, 1);
+});
+
 test("a hung prepare times out into a retryable dashboard error", async () => {
   const { todayKey } = analytics;
   const snapshot = savedSnapshot();
