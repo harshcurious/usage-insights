@@ -701,14 +701,17 @@ export default class Insights extends View {
       this.settingsQueued = true;
       return;
     }
-    let task = null;
-    task = cx.spawn(async (syncCx) => {
+    // A token, not the task handle: if spawn runs the body before returning,
+    // the handle isn't assigned yet and the slot would never be released.
+    const token = {};
+    this.settingsTask = token;
+    const task = cx.spawn(async (syncCx) => {
       try {
         if (this.showSettings) this.syncSettingsControls();
       } catch (error) {
         this.saveError = sanitizeError(error);
       } finally {
-        if (this.settingsTask === task) this.settingsTask = null;
+        if (this.settingsTask === token) this.settingsTask = null;
         if (this.showSettings && this.settingsQueued) {
           this.settingsQueued = false;
           this.scheduleSettingsSync(syncCx);
@@ -716,7 +719,7 @@ export default class Insights extends View {
         syncCx.notify();
       }
     });
-    this.settingsTask = task;
+    if (this.settingsTask === token) token.cancel = () => task?.cancel?.();
   }
 
   busy() {

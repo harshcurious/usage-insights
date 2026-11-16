@@ -1399,6 +1399,27 @@ test("watching a background index backs off instead of polling every second", ()
   instance.close();
 });
 
+test("settings sync releases its slot even when spawn runs the body at once", () => {
+  const instance = blankInstance();
+  instance.sourceInputs = new Map();
+  instance.refreshInput = null;
+  instance.configEditor = null;
+  instance.showSettings = true;
+  let syncs = 0;
+  instance.syncSettingsControls = () => { syncs += 1; };
+  const eagerCx = {
+    notify() {},
+    spawn(fn) { fn(eagerCx); return { cancel() {} }; },
+  };
+  instance.scheduleSettingsSync(eagerCx);
+  instance.scheduleSettingsSync(eagerCx);
+  instance.scheduleSettingsSync(eagerCx);
+  assert.equal(syncs, 3, "every request runs; none is parked behind a finished task");
+  assert.equal(instance.settingsTask, null);
+  assert.equal(instance.settingsQueued ?? false, false);
+  instance.close();
+});
+
 test("a hung prepare times out into a retryable dashboard error", async () => {
   const { todayKey } = analytics;
   const snapshot = savedSnapshot();
