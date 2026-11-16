@@ -1647,7 +1647,7 @@ export default class Insights extends View {
       .child(this.metricStrip(c, lifetime, peak, streaks))
       .when(rowCount === 0, (el) => el.child(this.emptyNotice(c, config)))
       .child(this.sectionHeader("Token usage", c))
-      .child(this.heatmapCard(c, config, heatmap, selectedDay))
+      .child(this.heatmapCard(c, config, heatmap, selectedDay, range))
       .child(this.tokenDetailCard(c, heatmap, selectedDay, derived.today, selectedTotals, selectedTop, lifetime, derived.lifetimeTop))
       .child(this.sectionHeader("Model usage", c))
       .child(this.filtersBar(c, config, range, derived.facets, years))
@@ -1815,7 +1815,7 @@ export default class Insights extends View {
     return band;
   }
 
-  heatmapCard(c, config, heatmap, selectedDay) {
+  heatmapCard(c, config, heatmap, selectedDay, range) {
     const dark = isDarkTheme(c);
     const palette = PALETTES.includes(config.palette) ? config.palette : "blue";
     const metrics = heatmapMetrics(this.width, heatmap.weeks.length, Number(settings().zoom) || 1, this.heatmapRowPx);
@@ -1875,7 +1875,7 @@ export default class Insights extends View {
 
     return card(c).gap(G.md)
       .child(h_flex().w_full().flex_wrap().gap(G.sm).items_center().justify_between()
-        .child(cardHeader("Tokens History", null, c))
+        .child(cardHeader("Tokens History", range?.label ?? null, c))
         .child(segmented("ins-heat-mode", [
           { key: "daily", label: "Daily" },
           { key: "weekly", label: "Weekly" },
@@ -1936,7 +1936,7 @@ export default class Insights extends View {
     return card(c).gap(G.md)
       .child(cardHeader(
         "Top models",
-        `${weeks.length} weeks · ${formatCompact(series.windowTotal)} tokens · ${series.includeCache ? "cache included" : "cache excluded"}`,
+        `${weeks.length} week${weeks.length === 1 ? "" : "s"} · ${formatCompact(series.windowTotal)} tokens · ${series.includeCache ? "cache included" : "cache excluded"}`,
         c,
       ))
       .when(maxTotal === 0, (el) => el.child(div().py(G.lg).text_size(T.body).text_color(c.mutedForeground)

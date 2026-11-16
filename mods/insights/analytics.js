@@ -505,6 +505,16 @@ export function periodRange(period = "all", options = {}) {
   return { period: "all", start: null, end: today, previous: null, label: "All time" };
 }
 
+/** Whole calendar weeks a range spans, so period-scoped charts stay in range. */
+export function rangeWeekCount(range, weekStartsOn = 0) {
+  if (!range || !isDay(range.start) || !isDay(range.end)) return null;
+  const first = parseDay(startOfWeek(range.start, weekStartsOn));
+  const last = parseDay(startOfWeek(range.end, weekStartsOn));
+  if (!first || !last) return null;
+  const days = Math.round((last.getTime() - first.getTime()) / 86_400_000);
+  return Math.max(1, Math.floor(days / 7) + 1);
+}
+
 export function rangeContains(day, range) {
   if (!isDay(day) || !range) return false;
   if (range.start && day < range.start) return false;
@@ -935,18 +945,21 @@ export function deriveDashboard(snapshot, options = {}) {
   const { filters, period, year, heatmapMode, leaderboardGroup, today } = settings;
   const years = availableYears(rows, today);
   const includeCache = config.includeCache;
-  // Token usage (metrics, heatmap, day detail) always covers everything;
-  // period and facet filters scope only the model usage sections.
+  // Only the all-time summary metrics (lifetime, peak, streaks) ignore the
+  // period; the heatmap, charts, totals and day detail follow the selected
+  // range and facets.
   const dimensionRows = filterRows(rows, filters);
   const range = periodRange(period, { today, weekStartsOn: config.weekStartsOn, year });
   const periodRows = filterRowsByRange(dimensionRows, range);
   const previousRows = range.previous ? filterRowsByRange(dimensionRows, range.previous) : null;
+  const periodWeeks = rangeWeekCount(range, config.weekStartsOn);
 
   const lifetime = sumTokens(rows, includeCache);
   const peak = peakDay(rows, includeCache);
   const streaks = streakStats(rows, { today, includeCache });
-  const heatmap = buildHeatmap(rows, {
-    endDay: today,
+  const heatmap = buildHeatmap(periodRows, {
+    ...(periodWeeks ? { weeks: periodWeeks } : {}),
+    endDay: range.end,
     weekStartsOn: config.weekStartsOn,
     mode: heatmapMode,
     includeCache,
@@ -957,7 +970,8 @@ export function deriveDashboard(snapshot, options = {}) {
     includeCache,
     limit: 10,
   });
-  const modelSeries = buildModelSeries(dimensionRows, {
+  const modelSeries = buildModelSeries(periodRows, {
+    ...(periodWeeks ? { weeks: periodWeeks } : {}),
     endDay: range.end,
     weekStartsOn: config.weekStartsOn,
     includeCache,

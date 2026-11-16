@@ -820,7 +820,7 @@ test("fitHeatmapWeeks keeps the newest weeks and trims month spans", () => {
 test("dashboard is divided into token and model usage sections", () => {
   assert.match(mainSource, /sectionHeader\("Token usage"/);
   assert.match(mainSource, /sectionHeader\("Model usage"/);
-  assert.match(mainSource, /cardHeader\("Tokens History", null, c\)/);
+  assert.match(mainSource, /cardHeader\("Tokens History", range\?\.label \?\? null, c\)/);
   assert.doesNotMatch(mainSource, /53 weeks · ends/);
   assert.match(mainSource, /"Model Usage"/);
   assert.doesNotMatch(mainSource, /Contribution history|Usage leaders/);

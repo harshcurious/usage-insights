@@ -788,13 +788,38 @@ function openCodeInt(value) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 
+// The OpenCode schema moved messages from a `message` table to
+// `session_message` (with the session's directory on `session_v2`). Bumping
+// this re-reads databases whose rows were collected through the older query.
+const OPENCODE_PARSER_VERSION = 3;
+
 /**
  * OpenCode stores sessions in one SQLite database. Messages are immutable
- * once completed and each assistant row carries canonical tokens, so a full
- * re-read through the max-upsert dedup is exact. The WAL file changes on
- * every write while the main database may not, so the checkpoint fingerprint
- * covers both files.
+ * once completed and each row that made a model call carries canonical
+ * tokens, so a full re-read through the max-upsert dedup is exact. The WAL
+ * file changes on every write while the main database may not, so the
+ * checkpoint fingerprint covers both files.
  */
+function openCodeSelect(db) {
+  const tables = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+      .map((row) => row.name),
+  );
+  if (tables.has("session_message")) {
+    const directory = tables.has("session_v2")
+      ? "s.directory AS directory"
+      : "NULL AS directory";
+    const join = tables.has("session_v2")
+      ? "LEFT JOIN session_v2 s ON s.id = m.session_id"
+      : "";
+    return `SELECT m.id AS id, m.session_id AS session_id, m.time_created AS time_created, m.data AS data, ${directory} FROM session_message m ${join}`;
+  }
+  if (tables.has("message")) {
+    return "SELECT session_id, id, time_created, data, NULL AS directory FROM message";
+  }
+  return null;
+}
+
 async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}) {
   let dbStat;
   try {
@@ -814,7 +839,7 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
 
   const key = fileKey(source.id, filePath);
   let entry = store.files[key];
-  if (entry?.state.opencodeParserVersion === 2 && entry.state.opencodeFingerprint === fingerprint) {
+  if (entry?.state.opencodeParserVersion === OPENCODE_PARSER_VERSION && entry.state.opencodeFingerprint === fingerprint) {
     if (entry.state.opencodeMalformedRows) sink.warn(`opencode ${filePath}: ${entry.state.opencodeMalformedRows} malformed message rows were skipped.`);
     stats.unchangedFiles += 1;
     return { dirty: false, aborted: false };
@@ -869,7 +894,9 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
   try {
     // Never open an external source writable, including on recovery errors.
     db = new sqlite.DatabaseSync(filePath, { readOnly: true });
-    const records = db.prepare("SELECT session_id, id, time_created, data FROM message").iterate();
+    const select = openCodeSelect(db);
+    if (!select) throw new Error("no message table found");
+    const records = db.prepare(select).iterate();
     resetFileEntry(store, entry);
     delete entry.state.unsupported;
     for (const record of records) {
@@ -885,8 +912,9 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
         continue;
       }
       if (!isPlainObject(data)) { malformedRows += 1; continue; }
-      if (data.role !== "assistant") continue;
-      if (!isPlainObject(data.tokens)) { malformedRows += 1; continue; }
+      // Rows that made no model call carry no tokens (users, tool results,
+      // switches); assistant steps and compaction summaries do.
+      if (!isPlainObject(data.tokens)) continue;
       const reported = [data.tokens.input, data.tokens.output, data.tokens.reasoning, data.tokens.cache?.read, data.tokens.cache?.write];
       if (reported.some((value) => value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0))) {
         malformedRows += 1;
@@ -903,13 +931,16 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
       const created = openCodeInt(data.time?.created) || openCodeInt(record.time_created);
       if (created <= 0 || !Number.isFinite(new Date(created).getTime())) { malformedRows += 1; continue; }
       const session = String(record.session_id ?? "unknown");
+      const project = typeof record.directory === "string" && record.directory
+        ? record.directory
+        : (typeof data.path?.cwd === "string" ? data.path.cwd : "");
       const result = addUsage(store, entry, {
         day: localDay(created),
         session,
         harness: source.id,
-        provider: openCodeString(data.providerID),
-        model: openCodeString(data.modelID),
-        project: typeof data.path?.cwd === "string" ? data.path.cwd : "",
+        provider: openCodeString(data.model?.providerID ?? data.providerID),
+        model: openCodeString(data.model?.id ?? data.modelID),
+        project,
       }, tokens, dedupKeyFor("opencode", "message", String(record.id)));
       const completed = openCodeInt(data.time?.completed);
       if (completed > created) {
@@ -941,7 +972,7 @@ async function scanOpenCodeDb(store, source, filePath, sink, stats, options = {}
   entry.size = dbStat.size;
   entry.mtimeMs = dbStat.mtimeMs;
   entry.state.opencodeFingerprint = fingerprint;
-  entry.state.opencodeParserVersion = 2;
+  entry.state.opencodeParserVersion = OPENCODE_PARSER_VERSION;
   entry.state.opencodeMalformedRows = malformedRows;
   if (malformedRows) sink.warn(`opencode ${filePath}: ${malformedRows} malformed message rows were skipped.`);
   stats.filesRead += 1;

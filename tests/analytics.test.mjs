@@ -365,7 +365,7 @@ test("leaderboard ranks, dedupes sessions and handles New and zero comparisons",
   assert.equal(compareChange(10, 10, false).label, "—");
 });
 
-test("dashboard scopes filters to model usage while the heatmap covers everything", () => {
+test("dashboard: lifetime metrics stay unfiltered while the heatmap follows the facets", () => {
   const value = snapshot({
     rows: [
       row({ day: "2024-01-08", session: "s1", model: "model-a", provider: "p1", tokens: { input: 100, output: 0 } }),
@@ -380,11 +380,9 @@ test("dashboard scopes filters to model usage while the heatmap covers everythin
     selectedDay: "2024-01-09",
     today: "2024-01-10",
   });
-  // Token usage is unfiltered: both days stay in the heatmap and metrics.
+  // Lifetime metrics ignore filters; the heatmap and model usage follow them.
   assert.equal(derived.lifetime.total, 400);
-  assert.equal(derived.heatmap.windowTotal, 400);
-  assert.equal(derived.selectedTotals.total, 300, "day detail follows the heatmap, not the filter");
-  // Model usage is filtered: only model-a leads.
+  assert.equal(derived.heatmap.windowTotal, 100);
   assert.deepEqual(derived.leaders.entries.map((entry) => entry.name), ["model-a"]);
   assert.deepEqual(derived.modelSeries.models, ["model-a"]);
 });
