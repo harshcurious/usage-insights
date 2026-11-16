@@ -505,6 +505,7 @@ export default class Insights extends View {
     this.year = Number(todayKey().slice(0, 4));
     this.heatmapMode = "daily";
     this.selectedDay = todayKey();
+    this.lastToday = this.selectedDay;
     this.showSettings = false;
     this.openFilter = null;
     this.openOptions = null;
@@ -788,7 +789,26 @@ export default class Insights extends View {
     this.timer = cx.timer.every(seconds * 1000, (timerCx) => this.refresh(timerCx));
   }
 
+  /**
+   * When the date changes while the panel is open, a selection that was
+   * following today (the day, or the year) moves to the new today; a day or
+   * year the person picked themselves stays.
+   */
+  followToday(today = todayKey()) {
+    const previous = this.lastToday;
+    this.lastToday = today;
+    if (!isDay(previous) || previous === today) return;
+    if (this.selectedDay === previous) this.selectedDay = today;
+    const previousYear = Number(previous.slice(0, 4));
+    const year = Number(today.slice(0, 4));
+    if (year !== previousYear && this.year === previousYear) {
+      this.year = year;
+      if (Array.isArray(this.years) && !this.years.includes(year)) this.years = [year, ...this.years];
+    }
+  }
+
   dashboardOptions() {
+    this.followToday();
     return {
       filters: this.filters,
       period: this.period,

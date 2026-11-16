@@ -1420,6 +1420,24 @@ test("settings sync releases its slot even when spawn runs the body at once", ()
   instance.close();
 });
 
+test("a selection following today moves at midnight and on New Year; a picked one stays", () => {
+  const instance = blankInstance();
+  instance.lastToday = "2026-12-31";
+  instance.selectedDay = "2026-12-31";
+  instance.year = 2026;
+  instance.years = [2026, 2025];
+  instance.followToday("2027-01-01");
+  assert.equal(instance.selectedDay, "2027-01-01");
+  assert.equal(instance.year, 2027);
+  assert.deepEqual(instance.years, [2027, 2026, 2025]);
+
+  instance.selectedDay = "2026-06-01";
+  instance.year = 2026;
+  instance.followToday("2027-01-02");
+  assert.equal(instance.selectedDay, "2026-06-01", "a day the person picked stays");
+  assert.equal(instance.year, 2026, "a year the person picked stays");
+});
+
 test("a hung prepare times out into a retryable dashboard error", async () => {
   const { todayKey } = analytics;
   const snapshot = savedSnapshot();
