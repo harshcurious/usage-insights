@@ -1375,6 +1375,30 @@ test("partial scan continuation reschedules while busy and stops on close", asyn
   assert.equal(refreshes.length, 1, "a closed view never refreshes again");
 });
 
+test("watching a background index backs off instead of polling every second", () => {
+  const { cx, calls } = liveCx();
+  const instance = blankInstance();
+  instance.sourceInputs = new Map();
+  instance.refreshInput = null;
+  instance.configEditor = null;
+  instance.refresh = () => {};
+  instance.snapshot = { ...savedSnapshot(), scan: { status: "running", processed: 1, total: 3 } };
+  const delays = [];
+  for (let streak = 1; streak <= 5; streak += 1) {
+    instance.scanWaitStreak = streak;
+    instance.cancelScanContinue();
+    instance.scheduleScanContinue(cx);
+    delays.push(calls.after.filter((timer) => !timer.cancelled).at(-1).ms);
+  }
+  assert.deepEqual(delays, [2_000, 4_000, 8_000, 10_000, 10_000]);
+  instance.snapshot.scan = { status: "partial", processed: 2, total: 3 };
+  instance.scanWaitStreak = 0;
+  instance.cancelScanContinue();
+  instance.scheduleScanContinue(cx);
+  assert.equal(calls.after.filter((timer) => !timer.cancelled).at(-1).ms, 250, "foreground slices continue at once");
+  instance.close();
+});
+
 test("a hung prepare times out into a retryable dashboard error", async () => {
   const { todayKey } = analytics;
   const snapshot = savedSnapshot();

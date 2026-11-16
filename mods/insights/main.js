@@ -879,9 +879,14 @@ export default class Insights extends View {
       this.cancelScanContinue();
       return;
     }
+    // A partial slice is foreground work, so the next one follows at once.
+    // While the background indexer runs, each tick only re-reads the whole
+    // store to show progress, in every open copy, so back off: 2s, 4s, 8s,
+    // then every 10s until the scan state changes.
+    const waits = Math.max(0, (this.scanWaitStreak ?? 1) - 1);
     const delay = scan.status === "partial" ? 250
-      : scan.status === "running" || scan.status === "starting" ? 900
-        : scan.status === "reconfiguring" ? 500
+      : scan.status === "running" || scan.status === "starting" ? Math.min(2_000 * 2 ** waits, 10_000)
+        : scan.status === "reconfiguring" ? 1_000
           : null;
     if (delay === null) {
       this.cancelScanContinue();
@@ -1187,6 +1192,8 @@ export default class Insights extends View {
     // Only compact metadata and the prepared dashboard are applied here. The
     // native settings controls are created or synced by a separate Task after
     // this notification, so they can never interrupt the first dashboard frame.
+    const waiting = ["running", "starting"].includes(this.snapshot?.scan?.status);
+    this.scanWaitStreak = waiting ? (this.scanWaitStreak ?? 0) + 1 : 0;
     this.scheduleScanContinue(cx);
     cx.notify();
     if (this.showSettings) this.scheduleSettingsSync(cx);
