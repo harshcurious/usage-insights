@@ -29,6 +29,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const collector = path.join(here, "..", "mods", "insights", "collector.mjs");
 const fixtures = path.join(here, "fixtures");
 
+/** A store as an older version wrote it: before the source-defaults marker. */
+function legacyStore(config) {
+  const store = emptyStore(config);
+  delete store.sourceDefaults;
+  return store;
+}
+
 async function env() {
   const root = await mkdtemp(path.join(tmpdir(), "insights-config-"));
   const home = path.join(root, "home");
@@ -526,7 +533,7 @@ test("untouched pre-Claude default stores gain Claude Code and scan local sessio
       },
     ],
   });
-  await saveStore(context.store, emptyStore(legacyDefaults));
+  await saveStore(context.store, legacyStore(legacyDefaults));
 
   const result = await snapshot(context);
   assert.deepEqual(
@@ -551,7 +558,7 @@ test("configure with untouched legacy defaults keeps Claude and cached history",
       roots: [...source.roots],
     })),
   });
-  const store = emptyStore(legacyConfig);
+  const store = legacyStore(legacyConfig);
   const entry = newFileEntry(store, {
     sourceId: "pi",
     path: "/removed/pi-session.jsonl",
@@ -589,6 +596,28 @@ test("configure with untouched legacy defaults keeps Claude and cached history",
   );
 });
 
+test("configure keeps a default source the person removed", async () => {
+  const context = await env();
+  await saveStore(context.store, emptyStore(normalizeConfig(DEFAULT_CONFIG)));
+  const withoutAntigravity = DEFAULT_CONFIG.sources
+    .filter((source) => source.id !== "antigravity")
+    .map((source) => ({ ...source, roots: [...source.roots] }));
+  const result = await configure(context, { sources: withoutAntigravity });
+  assert.deepEqual(
+    result.config.sources.map((source) => source.id),
+    ["pi", "codex", "opencode", "claude"],
+  );
+  const withoutBoth = withoutAntigravity.filter((source) => source.id !== "claude");
+  const again = await configure(context, { sources: withoutBoth });
+  assert.deepEqual(again.config.sources.map((source) => source.id), ["pi", "codex", "opencode"]);
+  const reloaded = await snapshot(context);
+  assert.deepEqual(
+    reloaded.config.sources.map((source) => source.id),
+    ["pi", "codex", "opencode"],
+    "loading the store does not bring removed sources back",
+  );
+});
+
 test("pre-Antigravity default stores discover compact transcripts at the new default root", async () => {
   const context = await env();
   const logs = path.join(context.home, ".gemini/antigravity-cli/brain/conversation/.system_generated/logs");
@@ -598,7 +627,7 @@ test("pre-Antigravity default stores discover compact transcripts at the new def
     input_tokens: 10, output_tokens: 5, cache_read_tokens: 20,
   }) + "\n");
   const previous = normalizeConfig({ sources: DEFAULT_CONFIG.sources.slice(0, 4) });
-  await saveStore(context.store, emptyStore(previous));
+  await saveStore(context.store, legacyStore(previous));
   const result = await snapshot(context);
   assert.deepEqual(result.config.sources, defaultConfig().sources);
   assert.equal(result.sourceStats.antigravity.status, "ok");

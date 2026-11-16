@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { storeRevisionFingerprint, writePresentationCache } from "./cache.mjs";
-import { defaultConfig, migrateLoadedConfig, normalizeConfig } from "./config.mjs";
+import { DEFAULT_CONFIG, defaultConfig, migrateLoadedConfig, normalizeConfig } from "./config.mjs";
 import {
   STORE_VERSION,
   atomicWriteJson,
@@ -75,10 +75,26 @@ export function storeGeneration(store) {
   return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
+/**
+ * How many default sources this store has been upgraded to. The upgrade that
+ * adds new default sources (Claude Code, then Antigravity) to an untouched
+ * older default list runs once per store; after that a default source the
+ * person removed stays removed, even though the list then looks untouched.
+ */
+export const SOURCE_DEFAULTS = DEFAULT_CONFIG.sources.length;
+
+function upgradeDefaultSources(holder, config) {
+  if (Number.isInteger(holder?.sourceDefaults) && holder.sourceDefaults >= SOURCE_DEFAULTS) {
+    return { config, migrated: false };
+  }
+  return migrateLoadedConfig(config);
+}
+
 export function emptyStore(config = defaultConfig()) {
   const store = {
     version: STORE_VERSION,
     config,
+    sourceDefaults: SOURCE_DEFAULTS,
     generation: 0,
     nextFileId: 1,
     files: {},
@@ -835,8 +851,11 @@ function validateLoadedStore(store) {
   if (!isPlainObject(store) || store.version !== STORE_VERSION) {
     throw new Error("unsupported store version");
   }
-  const configMigration = migrateLoadedConfig(normalizeConfig(store.config));
+  const configMigration = upgradeDefaultSources(store, normalizeConfig(store.config));
   store.config = configMigration.config;
+  const marker = Math.max(SOURCE_DEFAULTS, Number.isInteger(store.sourceDefaults) ? store.sourceDefaults : 0);
+  const markerChanged = store.sourceDefaults !== marker;
+  store.sourceDefaults = marker;
   if (!isPlainObject(store.files) || !isPlainObject(store.dedup) || !isPlainObject(store.tasks)) {
     throw new Error("store collections are malformed");
   }
@@ -921,14 +940,14 @@ function validateLoadedStore(store) {
       throw new Error(`task entry ${key} is malformed`);
     }
   }
-  return configMigration.migrated;
+  return { configMigrated: configMigration.migrated, dirty: configMigration.migrated || markerChanged };
 }
 
 /** The settings of a store that failed validation, when they are still valid. */
 function salvageConfig(parsed) {
   if (!isPlainObject(parsed) || !isPlainObject(parsed.config)) return null;
   try {
-    return migrateLoadedConfig(normalizeConfig(parsed.config)).config;
+    return upgradeDefaultSources(parsed, normalizeConfig(parsed.config)).config;
   } catch {
     return null;
   }
@@ -963,10 +982,10 @@ export async function loadStore(storePath, { readOnly = false } = {}) {
   }
   try {
     if (parsed === undefined) throw new Error("store is not valid JSON");
-    const migrated = validateLoadedStore(parsed);
+    const { configMigrated, dirty } = validateLoadedStore(parsed);
     ensureStoreMeta(parsed);
     prepareStore(parsed);
-    return { store: parsed, warnings, errors, exists: true, dirty: migrated };
+    return { store: parsed, warnings, errors, exists: true, dirty, configMigrated };
   } catch (error) {
     // Filter changes are reads, not recovery operations. Leave preservation
     // and repair to the next lock-protected snapshot/configure operation.

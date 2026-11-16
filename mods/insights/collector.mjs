@@ -668,7 +668,9 @@ async function configureStore(
   let config;
   try {
     const parsed = typeof rawConfig === "string" ? JSON.parse(rawConfig) : rawConfig;
-    config = migrateLoadedConfig(normalizeConfig(parsed)).config;
+    // The default-source upgrade is applied below only if the store on disk
+    // still had the legacy defaults; otherwise a removed source stays removed.
+    config = normalizeConfig(parsed);
   } catch (error) {
     const invalid = new Error(`invalid --config: ${error.message}`);
     invalid.exitCode = 2;
@@ -683,6 +685,9 @@ async function configureStore(
       const loaded = await loadStore(storePath);
       const store = loaded.store;
       let dirty = loaded.dirty;
+      // A panel opened before the upgrade can still submit the legacy defaults;
+      // upgrade those only when this store was itself upgraded on this load.
+      if (loaded.configMigrated) config = migrateLoadedConfig(config).config;
       const previousGeneration = storeGeneration(store);
       store.generation = Math.max(previousGeneration + 1, fence.generation);
       let persistedGeneration = previousGeneration;
