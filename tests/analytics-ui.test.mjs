@@ -1621,3 +1621,9 @@ test("running worker status shows current file and decoded bytes", () => {
   assert.match(label, /open-giant\.jsonl\.zst/, "the live file is visible");
   assert.match(label, /decoded/, "in-progress decoded bytes are visible");
 });
+
+test("leaderboard change labels show one sign: the arrow", () => {
+  assert.match(mainSource, /const magnitude = String\(entry\.change\.label\)\.replace\(\/\^\[\+-\]\/, ""\);/);
+  assert.match(mainSource, /return `↑\$\{magnitude\}`;/);
+  assert.match(mainSource, /return `↓\$\{magnitude\}`;/);
+});

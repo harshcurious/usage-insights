@@ -1972,8 +1972,10 @@ export default class Insights extends View {
 
     const changeLabel = (entry) => {
       if (entry.change.kind === "none") return "—";
-      if (entry.change.kind === "up") return `↑${entry.change.label}`;
-      if (entry.change.kind === "down") return `↓${entry.change.label}`;
+      // The label is already signed ("+12.3%"); the arrow replaces the sign.
+      const magnitude = String(entry.change.label).replace(/^[+-]/, "");
+      if (entry.change.kind === "up") return `↑${magnitude}`;
+      if (entry.change.kind === "down") return `↓${magnitude}`;
       return entry.change.label;
     };
 
