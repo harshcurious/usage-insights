@@ -979,7 +979,7 @@ export function deriveDashboard(snapshot, options = {}) {
 
   const selectedInRange = heatmap.cells.find((cell) => cell.date === settings.selectedDay && !cell.future);
   const selectedDay = selectedInRange ? settings.selectedDay : heatmap.range.dataEnd;
-  const selectedRows = rows.filter((row) => row.day === selectedDay);
+  const selectedRows = dimensionRows.filter((row) => row.day === selectedDay);
   const selectedTotals = sumTokens(selectedRows, includeCache);
   const selectedTop = selectedRows.length
     ? leaderboard(selectedRows, null, { groupBy: "model", includeCache, limit: 1 }).entries[0]

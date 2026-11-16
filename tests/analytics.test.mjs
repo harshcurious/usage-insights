@@ -385,6 +385,14 @@ test("dashboard: lifetime metrics stay unfiltered while the heatmap follows the 
   assert.equal(derived.heatmap.windowTotal, 100);
   assert.deepEqual(derived.leaders.entries.map((entry) => entry.name), ["model-a"]);
   assert.deepEqual(derived.modelSeries.models, ["model-a"]);
+  // The selected day's detail follows the same facets as the heatmap cell.
+  assert.equal(derived.selectedTotals.total, 0, "model-b's day shows no model-a usage");
+  const onA = deriveDashboard(value, {
+    filters: { provider: "all", model: "model-a" },
+    period: "all", year: 2024, heatmapMode: "daily", selectedDay: "2024-01-08", today: "2024-01-10",
+  });
+  assert.equal(onA.selectedTotals.total, 100);
+  assert.equal(onA.selectedTop.name, "model-a");
 });
 
 test("model series stacks weekly tokens by top model with an Other bucket", () => {
