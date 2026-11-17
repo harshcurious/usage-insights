@@ -1714,7 +1714,7 @@ export default class Insights extends View {
       .child(this.tokenDetailCard(c, heatmap, selectedDay, derived.today, selectedTotals, selectedTop, lifetime, derived.lifetimeTop))
       .child(this.sectionHeader("Model usage", c))
       .child(this.filtersBar(c, config, range, derived.facets, years))
-      .when(Boolean(derived.modelSeries?.weeks?.length), (el) => el.child(this.modelChartCard(c, derived.modelSeries)))
+      .when(Boolean(derived.modelSeries?.bars?.length), (el) => el.child(this.modelChartCard(c, derived.modelSeries)))
       .child(this.leaderboardCard(c, leaders, range));
   }
 
@@ -1976,21 +1976,34 @@ export default class Insights extends View {
   }
 
   modelChartCard(c, series) {
-    const weeks = series.weeks;
+    const bars = series.bars;
+    const daily = series.bucket === "day";
     const maxTotal = series.maxTotal || 0;
     const colors = new Map(series.models.map((name, index) => [name, modelChartColor(name, index)]));
 
-    const bar = (week) => v_flex().flex_1().min_w(0).h(CHART_HEIGHT).justify_end()
-      .tooltip(`Week of ${dayLabel(week.start)} · ${formatCompact(week.total)} tokens`)
-      .when(week.total > 0 && maxTotal > 0, (el) => el.child(
-        v_flex().w_full().flex_none().h(Math.max(2, Math.round((week.total / maxTotal) * CHART_HEIGHT)))
-          .children(week.segments.map((segment) => div().w_full().flex_grow(Math.max(0.001, segment.tokens))
+    const barLabel = (item) => {
+      if (daily || item.start === item.end) return dayLabel(item.start, { weekday: true });
+      return `${dayLabel(item.start, { year: false })} – ${dayLabel(item.end)}`;
+    };
+    const bar = (item) => v_flex().flex_1().min_w(0).h(CHART_HEIGHT).justify_end()
+      .tooltip(`${barLabel(item)} · ${formatCompact(item.total)} tokens`)
+      .when(item.total > 0 && maxTotal > 0, (el) => el.child(
+        v_flex().w_full().flex_none().h(Math.max(2, Math.round((item.total / maxTotal) * CHART_HEIGHT)))
+          .children(item.segments.map((segment) => div().w_full().flex_grow(Math.max(0.001, segment.tokens))
             .bg(colors.get(segment.name) ?? OTHER_CHART_COLOR)
             .tooltip(`${segment.name} · ${formatCompact(segment.tokens)} tokens`))),
       ));
 
     const axisLabel = (text) => div().text_size(9).text_color(c.dim).child(text);
-    const labelStep = Math.ceil(weeks.length / 6);
+    // Seven daily bars all fit a short weekday label; weeks label every few.
+    const labelStep = daily ? 1 : Math.ceil(bars.length / 6);
+    const tickLabel = (item) => {
+      if (!daily) return dayLabel(item.start, { year: false });
+      // "Wed, Nov 11" -> "Wed 11"
+      const [weekday, monthDay] = dayLabel(item.start, { weekday: true, year: false }).split(", ");
+      return `${weekday} ${monthDay.split(" ")[1]}`;
+    };
+    const unit = daily ? "day" : "week";
     const legend = h_flex().w_full().flex_wrap().gap_x(G.lg).gap_y(G.xs).items_center()
       .children(series.models.map((name) => h_flex().items_center().gap(G.xs)
         .child(div().size(8).flex_none().rounded_full().bg(colors.get(name) ?? OTHER_CHART_COLOR))
@@ -1999,7 +2012,7 @@ export default class Insights extends View {
     return card(c).gap(G.md)
       .child(cardHeader(
         "Top models",
-        `${weeks.length} week${weeks.length === 1 ? "" : "s"} · ${formatCompact(series.windowTotal)} tokens · ${series.includeCache ? "cache included" : "cache excluded"}`,
+        `${bars.length} ${unit}${bars.length === 1 ? "" : "s"} · ${formatCompact(series.windowTotal)} tokens · ${series.includeCache ? "cache included" : "cache excluded"}`,
         c,
       ))
       .when(maxTotal === 0, (el) => el.child(div().py(G.lg).text_size(T.body).text_color(c.mutedForeground)
@@ -2011,12 +2024,12 @@ export default class Insights extends View {
             axisLabel(formatCompact(maxTotal / 2)),
             axisLabel("0"),
           ]))
-          .child(h_flex().flex_1().min_w(0).gap(CELL_GAP).items_end().children(weeks.map(bar))))
+          .child(h_flex().flex_1().min_w(0).gap(CELL_GAP).items_end().children(bars.map(bar))))
         .child(h_flex().w_full().gap(G.sm)
           .child(div().w(28).flex_none())
-          .child(h_flex().flex_1().min_w(0).gap(CELL_GAP).children(weeks.map((week, index) => div()
+          .child(h_flex().flex_1().min_w(0).gap(CELL_GAP).children(bars.map((item, index) => div()
             .flex_1().min_w(0).text_size(9).text_color(c.dim).whitespace_nowrap()
-            .child(index % labelStep === 0 ? dayLabel(week.start, { year: false }) : "")))))
+            .child(index % labelStep === 0 ? tickLabel(item) : "")))))
         .child(legend)));
   }
 

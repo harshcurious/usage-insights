@@ -87,6 +87,9 @@ Changes from upstream:
   always cover the past year across every model, while the period and
   model/provider filters scope only the model chart and leaderboard;
   leaderboard changes show one sign.
+- The model chart follows the period: Week is the last 7 days with one bar
+  per day; Month, Year and All show one bar per week, with Month and Year
+  weeks clipped to the period.
 - Dashboard polling backs off while the background indexer runs.
 - Leftover temp/lock files are swept; only three corrupt backups are kept.
 - Settings sync can no longer stall; the selected day/year follow today across

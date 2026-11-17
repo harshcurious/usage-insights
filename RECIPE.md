@@ -46,8 +46,10 @@ Dashboard, top to bottom:
   and top model. Default the selected day to today.
 - Model usage: Week / Month / Year / All controls, a year stepper for Year,
   Provider and Model menus, and Clear filters when a filter is active.
-- Top models: a 26-week stacked token chart with date labels, a token axis, and
-  a categorical legend. Keep seven model series and fold the rest into Other.
+- Top models: a stacked token chart with date labels, a token axis, and a
+  categorical legend. Week shows one bar per day ("Mon 8" labels); Month and
+  Year one bar per week of the period, the first and last weeks clipped to it;
+  All the trailing 26 weeks. Keep seven model series and fold the rest into Other.
 - Model Usage: the top ten models with provider attribution, compact token totals,
   and change versus the previous calendar period. Two columns of five that wrap to
   one when the pane cannot hold both; use a 300px flex basis, growth, and zero
@@ -64,10 +66,10 @@ a full JSON editor, and scan status/warnings. No profile/avatar controls.
 30–3600 seconds (default 60); prevent overlapping scans. No-op scans do not rewrite
 the store. Filters scope only the model chart and leaderboard, not lifetime
 metrics or heatmap. Menus cap choices at 250 while retaining selected values.
-Week, month, and current-year periods are calendar-to-date; past years are full.
+Week is the last 7 days (today and the six before); month and current-year
+periods are calendar-to-date; past years are full.
 Compare with the same calendar portion of the previous period, clamping month
-ends. All has no comparison. The chart always spans 26 weeks ending at the selected
-period's end.
+ends. All has no comparison. The chart spans the selected period (All: 26 weeks).
 
 Weekly heatmap mode repeats each week's total on every day in that week;
 cumulative mode includes all preceding history. A streak ending yesterday still

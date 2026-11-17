@@ -986,7 +986,7 @@ test("model chart card renders stacked weekly bars, axis labels and a legend", (
     { day: "2024-01-09", model: "model-a", tokens: { input: 100, output: 0 } },
   ];
   const series = analytics.buildModelSeries(rows, { endDay: "2024-01-14", weeks: 4, weekStartsOn: 0 });
-  assert.equal(series.weeks.length, 4);
+  assert.equal(series.bars.length, 4);
   assert.equal(series.maxTotal, 400);
 
   const card = instance.modelChartCard(c, series);
@@ -998,6 +998,13 @@ test("model chart card renders stacked weekly bars, axis labels and a legend", (
   assert.equal(tallest.childNodes[0].childNodes.length, 2, "two models stack in one week");
   const legend = chart.childNodes[2];
   assert.equal(legend.childNodes.length, series.models.length, "one legend entry per model");
+
+  const daily = analytics.buildModelSeries(rows, { bucket: "day", startDay: "2024-01-08", endDay: "2024-01-14" });
+  const dailyChart = instance.modelChartCard(c, daily).childNodes[1];
+  assert.equal(dailyChart.childNodes[0].childNodes[1].childNodes.length, 7, "one column per day");
+  const ticks = dailyChart.childNodes[1].childNodes[1].childNodes;
+  assert.equal(ticks.length, 7, "every day is labelled");
+  assert.match(JSON.stringify(ticks[0]), /Mon 8/);
 });
 
 test("stat grids top-align rows when optional notes change sibling heights", () => {

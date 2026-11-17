@@ -251,10 +251,12 @@ test("filters match source, provider, model and project exactly", () => {
 });
 
 test("period ranges use calendar boundaries and equivalent previous periods", () => {
+  // Week is the trailing seven days, whatever the week start.
   const week = periodRange("week", { today: "2024-01-10", weekStartsOn: 1 });
-  assert.deepEqual(week.start, "2024-01-08");
+  assert.deepEqual(week.start, "2024-01-04");
   assert.deepEqual(week.end, "2024-01-10");
-  assert.deepEqual(week.previous, { start: "2024-01-01", end: "2024-01-03" });
+  assert.deepEqual(week.previous, { start: "2023-12-28", end: "2024-01-03" });
+  assert.equal(week.label, "Last 7 days");
 
   const month = periodRange("month", { today: "2024-03-31" });
   assert.equal(month.start, "2024-03-01");
@@ -401,25 +403,84 @@ test("model series stacks weekly tokens by top model with an Other bucket", () =
   ];
 
   const series = buildModelSeries(rows, { endDay: "2024-01-14", weeks: 4, weekStartsOn: 0, limit: 2, includeCache: false });
-  assert.equal(series.weeks.length, 4);
-  assert.deepEqual(series.weeks.map((week) => week.start), ["2023-12-24", "2023-12-31", "2024-01-07", "2024-01-14"]);
+  assert.equal(series.bucket, "week");
+  assert.equal(series.bars.length, 4);
+  assert.deepEqual(series.bars.map((bar) => bar.start), ["2023-12-24", "2023-12-31", "2024-01-07", "2024-01-14"]);
+  assert.deepEqual(series.bars.map((bar) => bar.end), ["2023-12-30", "2024-01-06", "2024-01-13", "2024-01-14"]);
   // model-c falls outside the top 2 and becomes Other; the out-of-window row is ignored.
   assert.deepEqual(series.models, ["model-a", "model-b", "Other"]);
   assert.equal(series.windowTotal, 650);
   assert.equal(series.maxTotal, 350);
-  assert.deepEqual(series.weeks[1].segments, [
+  assert.deepEqual(series.bars[1].segments, [
     { name: "model-a", tokens: 100 },
     { name: "model-b", tokens: 200 },
   ]);
-  assert.deepEqual(series.weeks[2].segments, [
+  assert.deepEqual(series.bars[2].segments, [
     { name: "model-a", tokens: 300 },
     { name: "Other", tokens: 50 },
   ]);
-  assert.deepEqual(series.weeks[0].segments, []);
+  assert.deepEqual(series.bars[0].segments, []);
   assert.equal(series.range.end, "2024-01-14");
 
   const noOther = buildModelSeries(rows.slice(0, 2), { endDay: "2024-01-14", weeks: 3, weekStartsOn: 0, includeCache: false });
   assert.deepEqual(noOther.models, ["model-b", "model-a"]);
+});
+
+test("model series draws one bar per day for daily buckets", () => {
+  const rows = [
+    row({ day: "2024-01-03", model: "model-a", tokens: { input: 999, output: 0 } }),
+    row({ day: "2024-01-04", model: "model-a", tokens: { input: 100, output: 0 } }),
+    row({ day: "2024-01-08", model: "model-b", tokens: { input: 200, output: 0 } }),
+    row({ day: "2024-01-08", model: "model-a", tokens: { input: 50, output: 0 } }),
+  ];
+  const series = buildModelSeries(rows, { bucket: "day", startDay: "2024-01-04", endDay: "2024-01-10", includeCache: false });
+  assert.equal(series.bucket, "day");
+  assert.deepEqual(series.bars.map((bar) => bar.start), [
+    "2024-01-04", "2024-01-05", "2024-01-06", "2024-01-07", "2024-01-08", "2024-01-09", "2024-01-10",
+  ]);
+  assert.ok(series.bars.every((bar) => bar.start === bar.end));
+  assert.equal(series.bars[0].total, 100, "the day before the window is left out");
+  assert.deepEqual(series.bars[4].segments, [
+    { name: "model-b", tokens: 200 },
+    { name: "model-a", tokens: 50 },
+  ]);
+  assert.equal(series.windowTotal, 350);
+});
+
+test("model series clips weekly bars to the period's start and end", () => {
+  const rows = [
+    row({ day: "2024-02-28", model: "model-a", tokens: { input: 999, output: 0 } }),
+    row({ day: "2024-03-01", model: "model-a", tokens: { input: 10, output: 0 } }),
+    row({ day: "2024-03-02", model: "model-a", tokens: { input: 20, output: 0 } }),
+    row({ day: "2024-03-12", model: "model-a", tokens: { input: 40, output: 0 } }),
+  ];
+  // March 2024 starts on a Friday; Sunday-start weeks.
+  const series = buildModelSeries(rows, { startDay: "2024-03-01", endDay: "2024-03-13", weekStartsOn: 0, includeCache: false });
+  assert.deepEqual(series.bars.map((bar) => [bar.start, bar.end]), [
+    ["2024-03-01", "2024-03-02"],
+    ["2024-03-03", "2024-03-09"],
+    ["2024-03-10", "2024-03-13"],
+  ]);
+  assert.deepEqual(series.bars.map((bar) => bar.total), [30, 0, 40]);
+  assert.equal(series.range.start, "2024-03-01");
+});
+
+test("dashboard charts Week by day and Month by week", () => {
+  const rows = [
+    row({ day: "2024-03-01", model: "model-a", tokens: { input: 10, output: 0 } }),
+    row({ day: "2024-03-12", model: "model-a", tokens: { input: 40, output: 0 } }),
+  ];
+  const week = deriveDashboard({ version: 1, config: {}, rows }, { period: "week", today: "2024-03-13" });
+  assert.equal(week.modelSeries.bucket, "day");
+  assert.equal(week.modelSeries.bars.length, 7);
+  assert.equal(week.modelSeries.bars[0].start, "2024-03-07");
+  assert.equal(week.modelSeries.windowTotal, 40);
+
+  const month = deriveDashboard({ version: 1, config: {}, rows }, { period: "month", today: "2024-03-13" });
+  assert.equal(month.modelSeries.bucket, "week");
+  assert.equal(month.modelSeries.bars[0].start, "2024-03-01");
+  assert.equal(month.modelSeries.bars.at(-1).end, "2024-03-13");
+  assert.equal(month.modelSeries.windowTotal, 50);
 });
 
 test("compact values cover billions and exact values keep every digit", () => {

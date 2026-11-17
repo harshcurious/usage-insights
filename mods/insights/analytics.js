@@ -463,18 +463,19 @@ export function availableYears(rows, today = todayKey()) {
 
 export function periodRange(period = "all", options = {}) {
   const today = isDay(options.today) ? options.today : todayKey();
-  const weekStartsOn = options.weekStartsOn === 1 ? 1 : 0;
   const currentYear = Number(today.slice(0, 4));
   const selectedYear = Number.isInteger(options.year) ? options.year : currentYear;
 
+  // Week is the trailing seven days (today and the six before), not the
+  // calendar week, so it always holds a full week of daily bars.
   if (period === "week") {
-    const start = startOfWeek(today, weekStartsOn);
+    const start = addDays(today, -6);
     return {
       period: "week",
       start,
       end: today,
       previous: { start: addDays(start, -7), end: addDays(today, -7) },
-      label: `Week of ${dayLabel(start, { year: false })}`,
+      label: "Last 7 days",
     };
   }
 
@@ -503,16 +504,6 @@ export function periodRange(period = "all", options = {}) {
   }
 
   return { period: "all", start: null, end: today, previous: null, label: "All time" };
-}
-
-/** Whole calendar weeks a range spans, so period-scoped charts stay in range. */
-export function rangeWeekCount(range, weekStartsOn = 0) {
-  if (!range || !isDay(range.start) || !isDay(range.end)) return null;
-  const first = parseDay(startOfWeek(range.start, weekStartsOn));
-  const last = parseDay(startOfWeek(range.end, weekStartsOn));
-  if (!first || !last) return null;
-  const days = Math.round((last.getTime() - first.getTime()) / 86_400_000);
-  return Math.max(1, Math.floor(days / 7) + 1);
 }
 
 export function rangeContains(day, range) {
@@ -703,37 +694,65 @@ export function leaderboard(rows, previousRows, options = {}) {
 }
 
 /**
- * Weekly stacked model usage over a trailing window. Buckets each week's
- * tokens per model, keeps the top models, and folds the rest into "Other".
- * Pure presentation data: no row identity, only names and token totals.
+ * Stacked model usage per bar. `bucket: "day"` gives one bar per day and
+ * `bucket: "week"` one bar per calendar week. With `startDay` the bars span
+ * startDay..endDay and the first/last weeks are clipped to that range (a month
+ * starts mid-week); without it, `days`/`weeks` bars end at endDay. Keeps the
+ * top models and folds the rest into "Other". Pure presentation data: no row
+ * identity, only names and token totals.
  */
 export function buildModelSeries(rows, options = {}) {
   const weekStartsOn = options.weekStartsOn === 1 ? 1 : 0;
   const includeCache = options.includeCache !== false;
-  const weekCount = Math.max(1, Math.floor(Number(options.weeks) || 26));
+  const bucket = options.bucket === "day" ? "day" : "week";
   const limit = Math.max(1, Math.floor(Number(options.limit) || 7));
   const endDay = isDay(options.endDay)
     ? options.endDay
     : isDay(options.today)
       ? options.today
       : todayKey();
-  const endWeekStart = startOfWeek(endDay, weekStartsOn);
-  const startDay = addDays(endWeekStart, -(weekCount - 1) * 7);
+  const fromDay = isDay(options.startDay) && options.startDay <= endDay ? options.startDay : null;
+
+  // Each bar is [start, end] inclusive; `key` is what a row's day maps to.
+  const bars = [];
+  if (bucket === "day") {
+    const count = Math.max(1, Math.floor(Number(options.days) || 7));
+    let day = fromDay ?? addDays(endDay, -(count - 1));
+    while (day <= endDay) {
+      bars.push({ key: day, start: day, end: day });
+      day = addDays(day, 1);
+    }
+  } else {
+    const count = Math.max(1, Math.floor(Number(options.weeks) || 26));
+    const lastWeek = startOfWeek(endDay, weekStartsOn);
+    let week = fromDay ? startOfWeek(fromDay, weekStartsOn) : addDays(lastWeek, -(count - 1) * 7);
+    while (week <= lastWeek) {
+      const weekEnd = addDays(week, 6);
+      bars.push({
+        key: week,
+        start: fromDay && fromDay > week ? fromDay : week,
+        end: weekEnd < endDay ? weekEnd : endDay,
+      });
+      week = addDays(week, 7);
+    }
+  }
+  const firstDay = bars[0].start;
+  const keyOf = (day) => (bucket === "day" ? day : startOfWeek(day, weekStartsOn));
 
   const modelTotals = new Map();
-  const weekly = new Map();
+  const byBar = new Map();
   for (const row of rows ?? []) {
-    if (!isDay(row?.day) || row.day < startDay || row.day > endDay) continue;
+    if (!isDay(row?.day) || row.day < firstDay || row.day > endDay) continue;
     const name = displayName(row?.model, "model");
     const tokens = rowTokenTotal(row, includeCache);
     modelTotals.set(name, (modelTotals.get(name) ?? 0) + tokens);
-    const weekStart = startOfWeek(row.day, weekStartsOn);
-    let bucket = weekly.get(weekStart);
-    if (!bucket) {
-      bucket = new Map();
-      weekly.set(weekStart, bucket);
+    const key = keyOf(row.day);
+    let totals = byBar.get(key);
+    if (!totals) {
+      totals = new Map();
+      byBar.set(key, totals);
     }
-    bucket.set(name, (bucket.get(name) ?? 0) + tokens);
+    totals.set(name, (totals.get(name) ?? 0) + tokens);
   }
 
   const top = [...modelTotals.entries()]
@@ -742,23 +761,21 @@ export function buildModelSeries(rows, options = {}) {
     .map(([name]) => name);
   const keep = new Set(top);
 
-  const weeks = [];
   let maxTotal = 0;
   let windowTotal = 0;
   let hasOther = false;
-  for (let index = 0; index < weekCount; index += 1) {
-    const weekStart = addDays(startDay, index * 7);
-    const bucket = weekly.get(weekStart);
+  const out = bars.map(({ key, start, end }) => {
+    const totals = byBar.get(key);
     const segments = [];
     let total = 0;
     for (const name of top) {
-      const tokens = bucket?.get(name) ?? 0;
+      const tokens = totals?.get(name) ?? 0;
       if (tokens > 0) segments.push({ name, tokens });
       total += tokens;
     }
     let other = 0;
-    if (bucket) {
-      for (const [name, tokens] of bucket) {
+    if (totals) {
+      for (const [name, tokens] of totals) {
         if (!keep.has(name)) other += tokens;
       }
     }
@@ -769,16 +786,17 @@ export function buildModelSeries(rows, options = {}) {
     }
     if (total > maxTotal) maxTotal = total;
     windowTotal += total;
-    weeks.push({ start: weekStart, total, segments });
-  }
+    return { start, end, total, segments };
+  });
 
   return {
-    weeks,
+    bucket,
+    bars: out,
     models: hasOther ? [...top, "Other"] : top,
     maxTotal,
     windowTotal,
     includeCache,
-    range: { start: startDay, end: endDay },
+    range: { start: firstDay, end: endDay },
   };
 }
 
@@ -958,7 +976,6 @@ export function deriveDashboard(snapshot, options = {}) {
   const range = periodRange(period, { today, weekStartsOn: config.weekStartsOn, year });
   const periodRows = filterRowsByRange(dimensionRows, range);
   const previousRows = range.previous ? filterRowsByRange(dimensionRows, range.previous) : null;
-  const periodWeeks = rangeWeekCount(range, config.weekStartsOn);
 
   const lifetime = sumTokens(rows, includeCache);
   const peak = peakDay(rows, includeCache);
@@ -975,8 +992,11 @@ export function deriveDashboard(snapshot, options = {}) {
     includeCache,
     limit: 10,
   });
+  // Week: a bar per day of the last seven. Month and Year: a bar per week,
+  // clipped to the period. All: the trailing 26 weeks.
   const modelSeries = buildModelSeries(periodRows, {
-    ...(periodWeeks ? { weeks: periodWeeks } : {}),
+    bucket: period === "week" ? "day" : "week",
+    ...(range.start ? { startDay: range.start } : {}),
     endDay: range.end,
     weekStartsOn: config.weekStartsOn,
     includeCache,
@@ -1277,7 +1297,7 @@ function isDashboard(value) {
     (entry) => object(entry) && typeof entry.name === "string" && object(entry.change))) return false;
   const series = value.modelSeries;
   return series === null || (object(series) && arrayOf(series.models, (model) => typeof model === "string")
-    && arrayOf(series.weeks, (week) => object(week) && isDay(week.start) && arrayOf(week.segments, object)));
+    && arrayOf(series.bars, (bar) => object(bar) && isDay(bar.start) && isDay(bar.end) && arrayOf(bar.segments, object)));
 }
 
 /** Validates the compact payload produced by presenter.mjs before native rendering. */
